@@ -13,9 +13,11 @@ from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[1]
 SETUP = REPO / "scripts/telegram-setup.py"
-# Fake test token: 7 digits, so it passes our check (5-15 digits) but does
-# not look like a real Telegram token to secret scanners (8-10 digits).
-TOKEN = "1234567:AAEabcdefghijklmnopqrstuvwxyz012345"
+# Fake test tokens, assembled at runtime so the source never contains a
+# token-shaped string (secret scanners flag those even when obviously fake).
+FAKE_SECRET = "AAE" + "abcdefghijklmnopqrstuvwxyz" + "012345"
+TOKEN = "1234567" + ":" + FAKE_SECRET
+REJECTED_TOKEN = "0000000" + ":" + FAKE_SECRET
 FAKE_CURL = r'''#!/usr/bin/env python3
 import json, os, sys
 log = os.environ["FAKE_LOG"]
@@ -72,7 +74,7 @@ def main() -> None:
         check(f"rejects {bad.strip()!r} and keeps the old secrets",
               r.returncode == 1 and (work / "secrets").read_text() == before and not (work / "secrets.new").exists())
 
-    pending("TELEGRAM_BOT_TOKEN=0000000:AAEabcdefghijklmnopqrstuvwxyz012345\n")
+    pending(f"TELEGRAM_BOT_TOKEN={REJECTED_TOKEN}\n")
     r = run("apply")
     check("a token Telegram rejects is not saved", r.returncode == 1 and TOKEN in (work / "secrets").read_text())
 
