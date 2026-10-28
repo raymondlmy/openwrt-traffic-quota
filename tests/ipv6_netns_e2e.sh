@@ -10,6 +10,11 @@
 set -euo pipefail
 
 if [ "${R3S_E2E_INNER:-}" != 1 ]; then
+    # As root (CI) skip the user-namespace mapping, which would hide files
+    # owned by other users; as a normal user it provides the needed root.
+    if [ "$(id -u)" -eq 0 ]; then
+        exec env R3S_E2E_INNER=1 unshare -nm --propagation private "$0" "$@"
+    fi
     exec env R3S_E2E_INNER=1 unshare -rnm --propagation private "$0" "$@"
 fi
 

@@ -28,7 +28,10 @@ rm -f "$T/out.nft"
 render; rc=$?   # no uci, no overrides
 [ $rc -eq 1 ] && grep -q "cannot detect the WAN device" "$T/err" && ok "fails clearly when WAN cannot be detected" || bad "no-WAN rc=$rc"
 render LAN_IFACES=br-lan WAN_IFACES=pppoe-wan
-if unshare -rn sh -c "nft -f '$T/out.nft' && nft -f '$T/out.nft' && nft -f '$REPO/config/nftables/ruleset-pre/20-r3s-policy.nft' && nft -f '$REPO/config/nftables/ruleset-pre/20-r3s-policy.nft'" 2>"$T/nfterr"; then
+# As root (CI) a plain network namespace is enough; '-r' would hide files
+# owned by other users. As a normal user, map ourselves to root in a userns.
+NS="unshare -rn"; [ "$(id -u)" -eq 0 ] && NS="unshare -n"
+if $NS sh -c "nft -f '$T/out.nft' && nft -f '$T/out.nft' && nft -f '$REPO/config/nftables/ruleset-pre/20-r3s-policy.nft' && nft -f '$REPO/config/nftables/ruleset-pre/20-r3s-policy.nft'" 2>"$T/nfterr"; then
     ok "rendered + policy rules load and reload in nft (no 'destroy table')"
 else bad "nft load: $(head -2 "$T/nfterr")"; fi
 echo; [ "$fails" -eq 0 ] && echo "ALL PASSED" || { echo "$fails FAILED"; exit 1; }
