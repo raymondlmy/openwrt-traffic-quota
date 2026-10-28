@@ -17,3 +17,9 @@ release 0.5.0-16).
 - The live device registry is never packaged. An upgrade restores it from a
   pre-upgrade copy if it was removed, and a fresh install starts empty.
 - `r3s-policy-ro`: read-only entry point for LuCI users with read access.
+- Configurable device groups (`groups`) and report layout
+  (`report_hourly_groups`, `report_device_groups`). Previously only Personal,
+  Kids and IoT existed, and other groups were missing from reports.
+- `interval` sets the collector and evaluator cycle (default 60 s).
+- AdGuard CSV export marks each query with the device's group from the
+  accounting database, instead of a fixed list of IP addresses.

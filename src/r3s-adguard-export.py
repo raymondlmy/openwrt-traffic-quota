@@ -19,11 +19,22 @@ import time
 from datetime import datetime, timedelta
 
 DB_DEFAULT = "/var/lib/r3s-accounting/accounting.sqlite3"
-# AdGuard moved to persistent storage (2026-09-21): /var/lib is tmpfs on
-# OpenWrt and the 90d querylog filled RAM. Prefer /opt, fall back to legacy.
+# AdGuard Home query log: the 'adguard_querylog' UCI option wins; otherwise a
+# persistent /opt location (/var/lib is RAM on OpenWrt), then the default.
 QUERYLOG_PERSISTENT = "/opt/adguardhome/data/querylog.json"
 QUERYLOG_LEGACY = "/var/lib/adguardhome/data/querylog.json"
-QUERYLOG_DEFAULT = (
+
+def configured_querylog() -> str:
+    """'adguard_querylog' from /etc/config/r3s-accounting, or ''."""
+    try:
+        text = open("/etc/config/r3s-accounting", encoding="utf-8").read()
+    except OSError:
+        return ""
+    match = re.search(r"option\s+adguard_querylog\s+['\"]?([^'\"\n]*)", text)
+    return match.group(1).strip() if match else ""
+
+
+QUERYLOG_DEFAULT = configured_querylog() or (
     QUERYLOG_PERSISTENT if os.path.exists(QUERYLOG_PERSISTENT) else QUERYLOG_LEGACY
 )
 EXCLUDE_DEFAULT = "/etc/r3s-accounting/excluded_str"

@@ -2,7 +2,27 @@
   "admin/services/r3s-policy": {
     "title": "Traffic Quotas",
     "order": 85,
-    "action": { "type": "view", "path": "r3s-policy" },
-    "depends": { "acl": [ "luci-app-r3s-policy" ] }
+    "action": {
+      "type": "view",
+      "path": "r3s-policy"
+    },
+    "depends": {
+      "acl": [
+        "luci-app-r3s-policy"
+      ]
+    }
+  },
+  "admin/services/r3s-telegram": {
+    "title": "Telegram Reports",
+    "order": 86,
+    "action": {
+      "type": "view",
+      "path": "r3s-telegram"
+    },
+    "depends": {
+      "acl": [
+        "luci-app-r3s-policy"
+      ]
+    }
   }
 }

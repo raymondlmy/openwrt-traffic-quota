@@ -130,7 +130,8 @@ return view.extend({
             L.resolveDefault(readCommand(['devices']), ''),
             L.resolveDefault(readCommand(['evaluate']), ''),
             L.resolveDefault(readCommand(['unresolved']), ''),
-            L.resolveDefault(readCommand(['exclusions']), '')
+            L.resolveDefault(readCommand(['exclusions']), ''),
+            L.resolveDefault(readCommand(['groups']), 'Personal\nKids\nIoT')
         ]);
     },
 
@@ -380,6 +381,9 @@ return view.extend({
         var decisions = evaluateRows(data[2]);
         var unresolved = unresolvedRows(data[3]);
         var exclusions = data[4] || '';
+        var groups = splitLines(data[5]);
+        if (!groups.length)
+            groups = ['Personal', 'Kids', 'IoT'];
         var policyTableRows = policies.length ? policies.map(function(row) {
             var actions = [];
             actions.push(E('button', {
@@ -459,11 +463,8 @@ return view.extend({
                 ]),
                 E('div', { 'class': 'cbi-value' }, [
                     E('label', { 'class': 'cbi-value-title', 'for': 'r3s-device-group' }, _('Group')),
-                    E('div', { 'class': 'cbi-value-field' }, E('select', { 'id': 'r3s-device-group', 'class': 'cbi-input-select' }, [
-                        E('option', { 'value': 'Personal' }, _('Personal')),
-                        E('option', { 'value': 'Kids' }, _('Kids')),
-                        E('option', { 'value': 'IoT' }, _('IoT'))
-                    ]))
+                    E('div', { 'class': 'cbi-value-field' }, E('select', { 'id': 'r3s-device-group', 'class': 'cbi-input-select' },
+                        groups.map(function(group) { return E('option', { 'value': group }, group); })))
                 ]),
                 E('div', { 'class': 'cbi-value' }, [
                     E('label', { 'class': 'cbi-value-title', 'for': 'r3s-device-mac' }, _('MAC address')),

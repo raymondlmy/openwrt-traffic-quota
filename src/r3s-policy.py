@@ -3,8 +3,8 @@
 # Copyright (C) 2026 Graype
 """Small, dependency-free policy database interface.
 
-The evaluator/enforcer is deliberately separate; this command only manages
-validated policy records for the future LuCI frontend and enforcement daemon.
+The evaluator/enforcer is deliberately separate; this command manages
+validated device and policy records for LuCI and the command line.
 """
 from __future__ import annotations
 import argparse, json, os, re, sqlite3, sys, tempfile, time
@@ -13,6 +13,24 @@ from datetime import datetime
 DB_DEFAULT = "/var/lib/r3s-accounting/accounting.sqlite3"
 REGISTRY_DEFAULT = "/etc/r3s-accounting/devices.json"
 EXCLUDE_DEFAULT = "/etc/r3s-accounting/excluded_str"
+ACCOUNTING_UCI = "/etc/config/r3s-accounting"
+
+
+def uci_list(name: str, default: list) -> list:
+    """Space-separated option from /etc/config/r3s-accounting (default if unset)."""
+    try:
+        text = open(ACCOUNTING_UCI, encoding="utf-8").read()
+    except OSError:
+        return default
+    match = re.search(rf"option\s+{re.escape(name)}\s+['\"]?([^'\"\n]*)", text)
+    values = match.group(1).split() if match else []
+    return values or default
+
+GROUP_RE = re.compile(r"[A-Za-z0-9_-]{1,32}")
+
+def allowed_groups():
+    """Device groups from the 'groups' option (default Personal Kids IoT)."""
+    return [g for g in uci_list("groups", ["Personal", "Kids", "IoT"]) if GROUP_RE.fullmatch(g)]
 
 def schedule_active(days_text, start, end, day, minute):
     if not days_text:
@@ -208,8 +226,8 @@ def add_device(con, args):
     mac = args.mac.lower()
     if not name or len(name) > 80 or any(ord(char) < 32 for char in name):
         raise SystemExit("invalid device name")
-    if group not in ("Personal", "Kids", "IoT"):
-        raise SystemExit("group must be Personal, Kids, or IoT")
+    if group not in allowed_groups():
+        raise SystemExit("group must be one of: " + ", ".join(allowed_groups()))
     if not re.fullmatch(r"[0-9a-f]{2}(?::[0-9a-f]{2}){5}", mac):
         raise SystemExit(f"invalid MAC: {args.mac}")
     data = load_registry(args.registry)
@@ -493,11 +511,12 @@ def main():
     sub.add_parser('devices', help='list valid device IDs and names')
     sub.add_parser('unresolved', help='list current IP/MAC observations without a device')
     sub.add_parser('evaluate', help='show current decisions; does not enforce')
+    sub.add_parser('groups', help='list the device groups that can be assigned')
     a = sub.add_parser('sync-devices', help='provision all devices from the registry')
     a.add_argument('--registry', default=REGISTRY_DEFAULT)
     a = sub.add_parser('add-device', help='register a new device and MAC in the registry')
     a.add_argument('--name', required=True)
-    a.add_argument('--group', required=True, choices=['Personal', 'Kids', 'IoT'])
+    a.add_argument('--group', required=True, help='a group from the groups option')
     a.add_argument('--mac', required=True)
     a.add_argument('--registry', default=REGISTRY_DEFAULT)
     a = sub.add_parser('delete-device', help='remove a device from the registry and disable it')
@@ -536,6 +555,9 @@ def main():
     a = sub.add_parser('reset-quota', help="reset today's measured quota for a policy")
     a.add_argument('--policy-id', type=int, required=True)
     args = p.parse_args()
+    if args.command == 'groups':
+        print('\n'.join(allowed_groups()))
+        return 0
     try:
         with db(args.db) as con:
             list_policies(con) if args.command == 'list' else list_devices(con) if args.command == 'devices' else list_unresolved(con) if args.command == 'unresolved' else sync_devices(con, args) if args.command == 'sync-devices' else add_device(con, args) if args.command == 'add-device' else delete_device(con, args) if args.command == 'delete-device' else associate_mac(con, args) if args.command == 'associate-mac' else forget_unresolved(con, args) if args.command == 'forget-unresolved' else exclusions(args) if args.command == 'exclusions' else evaluate(con) if args.command == 'evaluate' else add_policy(con, args) if args.command == 'add' else edit_policy(con, args) if args.command == 'edit' else delete_policy(con, args) if args.command == 'delete' else set_quota(con, args) if args.command == 'set-quota' else reset_quota(con, args)

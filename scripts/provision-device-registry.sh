@@ -15,7 +15,7 @@ done
 
 # Live registry is authoritative. This file, when run by package install, is a
 # template of placeholder MACs and must not prune real mappings.
-DB="${DB:-/opt/r3s-accounting/data/accounting.sqlite3}"
+DB="${DB:-/var/lib/r3s-accounting/accounting.sqlite3}"
 REGISTRY="${REGISTRY:-/etc/r3s-accounting/devices.json}"
 
 [ -f "$DB" ] || { echo "ERROR: database not found: $DB" >&2; exit 1; }

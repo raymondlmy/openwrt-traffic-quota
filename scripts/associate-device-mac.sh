@@ -5,7 +5,7 @@ set -eu
 
 DEVICE_ID="${1:-}"
 MAC="${2:-}"
-DB="${3:-/opt/r3s-accounting/accounting.sqlite3}"
+DB="${3:-/var/lib/r3s-accounting/accounting.sqlite3}"
 REGISTRY="${4:-/etc/r3s-accounting/devices.json}"
 
 [ -n "$DEVICE_ID" ] && [ -n "$MAC" ] || {

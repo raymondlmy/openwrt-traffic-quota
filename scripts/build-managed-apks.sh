@@ -18,6 +18,7 @@ export STAGING_DIR_HOST="$SDK/staging_dir/host"
 field() { sed -n "s/^$1:=//p" "$REPO/packages/$2/Makefile"; }
 ACC_VER="$(field PKG_VERSION r3s-accounting)-r$(field PKG_RELEASE r3s-accounting)"
 LUCI_VER="$(field PKG_VERSION luci-app-r3s)-r$(field PKG_RELEASE luci-app-r3s)"
+TG_VER="$(field PKG_VERSION r3s-accounting-telegram)-r$(field PKG_RELEASE r3s-accounting-telegram)"
 OUT="$REPO/dist/apk/$(field PKG_VERSION r3s-accounting)"
 URL="https://github.com/raymondlmy/openwrt-traffic-quota"
 WORK=$(mktemp -d)
@@ -52,6 +53,15 @@ L="$WORK/luci"
 install -d -m 0755 "$L/usr/share/luci/menu.d" "$L/www/luci-static/resources/view" "$L/usr/share/rpcd/acl.d"
 install -m 0644 "$REPO/config/luci/menu.d/r3s-policy.json" "$L/usr/share/luci/menu.d/"
 install -m 0644 "$REPO/config/luci/view/r3s-policy.js" "$L/www/luci-static/resources/view/"
+install -m 0644 "$REPO/config/luci/view/r3s-telegram.js" "$L/www/luci-static/resources/view/"
+
+T="$WORK/telegram"
+install -d -m 0755 "$T/usr/bin"
+for job in daily-report daily-health-report health-alerts quota-alerts; do
+    install -m 0755 "$REPO/scripts/send-telegram-$job.sh" "$T/usr/bin/r3s-telegram-$job"
+done
+install -m 0755 "$REPO/scripts/telegram-setup.py" "$T/usr/bin/r3s-telegram-setup"
+install -m 0755 "$REPO/scripts/telegram-status.sh" "$T/usr/bin/r3s-telegram-status"
 install -m 0644 "$REPO/config/luci/acl.d/luci-app-r3s-policy.json" "$L/usr/share/rpcd/acl.d/"
 
 "$FAKEROOT" "$APK" mkpkg --info "name:r3s-accounting" --info "version:$ACC_VER" \
@@ -71,4 +81,12 @@ install -m 0644 "$REPO/config/luci/acl.d/luci-app-r3s-policy.json" "$L/usr/share
   --info 'depends:libc luci-base r3s-accounting rpcd' --info 'provides:luci-app-r3s-any' \
   --files "$L" --output "$OUT/luci-app-r3s-$LUCI_VER.apk"
 
-(cd "$OUT" && sha256sum "r3s-accounting-$ACC_VER.apk" "luci-app-r3s-$LUCI_VER.apk" > SHA256SUMS && cat SHA256SUMS)
+"$FAKEROOT" "$APK" mkpkg --info "name:r3s-accounting-telegram" --info "version:$TG_VER" \
+  --info 'description:Telegram daily reports, quota alerts and router-health alerts for r3s-accounting.' \
+  --info 'arch:noarch' --info 'license:GPL-2.0-only' --info 'origin:openwrt-traffic-quota/r3s-accounting-telegram' \
+  --info 'maintainer:Graype' --info "url:$URL" \
+  --info 'depends:libc ca-bundle curl r3s-accounting' --info 'provides:r3s-accounting-telegram-any' \
+  --files "$T" --output "$OUT/r3s-accounting-telegram-$TG_VER.apk"
+
+(cd "$OUT" && sha256sum "r3s-accounting-$ACC_VER.apk" "luci-app-r3s-$LUCI_VER.apk" \
+    "r3s-accounting-telegram-$TG_VER.apk" > SHA256SUMS && cat SHA256SUMS)

@@ -1,4 +1,13 @@
 config accounting 'main'
+    # Device groups that can be assigned (space-separated; letters, digits,
+    # '_' and '-'). Reports: report_hourly_groups get a per-device hourly grid,
+    # report_device_groups a per-device list, all other groups a summary line.
+    option groups 'Personal Kids IoT'
+    option report_hourly_groups 'Kids'
+    option report_device_groups 'IoT'
+    # (use 'none' to switch a report list off)
+    # Seconds between collector samples and between policy evaluations.
+    option interval '60'
     # Days of history kept in the database.
     option retention_days '14'
     # Interfaces to measure between (space-separated names allowed).

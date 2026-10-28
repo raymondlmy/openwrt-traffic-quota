@@ -1,12 +1,15 @@
 {
   "luci-app-r3s-policy": {
-    "description": "Traffic quota and device policy management",
+    "description": "Traffic quotas, device policies and Telegram reports",
     "read": {
       "file": {
         "/usr/bin/r3s-policy-ro": [
           "exec"
         ],
         "/usr/bin/r3s-policy-ro *": [
+          "exec"
+        ],
+        "/usr/bin/r3s-telegram-status": [
           "exec"
         ]
       },
@@ -26,11 +29,21 @@
         ],
         "/usr/bin/r3s-policy *": [
           "exec"
+        ],
+        "/usr/bin/r3s-telegram-setup": [
+          "exec"
+        ],
+        "/usr/bin/r3s-telegram-setup *": [
+          "exec"
+        ],
+        "/etc/r3s-accounting/secrets.new": [
+          "write"
         ]
       },
       "ubus": {
         "file": [
-          "exec"
+          "exec",
+          "write"
         ]
       }
     }

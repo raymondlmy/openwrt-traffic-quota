@@ -10,13 +10,20 @@ for OpenWrt routers, over **IPv4 and IPv6**.
 - **Per-site quotas.** Give a device a daily budget for a set of domains, e.g.
   30 MB of a games site. When it's used up, only that device/site pair is
   blocked until midnight.
-- **LuCI page** (Services → Traffic Quotas) to register devices, approve new
-  MAC addresses and edit policies. Read-only LuCI users can view but not change
-  anything.
+- **Telegram reports** (optional): a daily traffic report, quota alerts and
+  router-health alerts, set up from LuCI. See [TELEGRAM.md](TELEGRAM.md).
+- **LuCI pages** (Services → Traffic Quotas, Services → Telegram Reports) to
+  register devices, approve new MAC addresses, edit policies and set up
+  Telegram. Read-only LuCI users can view but not change anything.
 
-Two packages: **`r3s-accounting`** (collector, reports, policy evaluator, CLI)
-and **`luci-app-r3s`** (web page). The `r3s` names are historical: the project
-started on a NanoPi R3S. Nothing in it is specific to that board.
+| Package | Contents |
+|---|---|
+| **`r3s-accounting`** | collector, reports (`bw-rpt`), policy evaluator, `r3s-policy` CLI |
+| **`luci-app-r3s`** | the two LuCI pages |
+| **`r3s-accounting-telegram`** | Telegram reports and alerts, `r3s-telegram-setup` (optional) |
+
+The `r3s` names are historical: the project started on a NanoPi R3S. Nothing
+in it is specific to that board.
 
 ## How it works
 
@@ -46,8 +53,9 @@ LAN devices ──► nftables (inet r3s_accounting)  counts bytes per IP and pe
 |---|---|
 | OpenWrt | **25.12** (apk). Tested on 25.12.5 (rockchip/armv8). 24.10 (opkg) is untested. |
 | Storage | **Persistent, writable storage that isn't the router's flash**: an SD card, eMMC, USB or SSD, with about 50–150 MB free. The database is written every minute. Typical SBCs (NanoPi, Raspberry Pi, x86) qualify. Most 16–128 MB flash routers don't. |
-| Packages | `python3`, `sqlite3-cli` and `nftables-json`, pulled in automatically. |
-| Per-site quotas | **AdGuard Home** with its query log enabled. Schedules and whole-device blocks work without it. |
+| Packages | `python3`, `sqlite3-cli` and `nftables-json`, pulled in automatically. Full list in [INSTALL.md](INSTALL.md#1-packages-you-need). |
+| AdGuard Home | **Optional.** Only per-site quotas need it, with its query log enabled. Accounting, reports, schedules and whole-device blocks work without it. |
+| Telegram (optional) | `curl` and `ca-bundle` (pulled in), a bot token from @BotFather. |
 | Firewall | **Flow offloading off.** Offloaded connections skip nftables, so they would be neither counted nor blocked. The installer warns if it's on. |
 | Network | Devices must reach the router with their own MAC. Wi-Fi access points must be in bridge mode, not routing/NAT. |
 
@@ -67,12 +75,14 @@ LAN devices ──► nftables (inet r3s_accounting)  counts bytes per IP and pe
 
 ## Quick start
 
-See **[INSTALL.md](INSTALL.md)** for building and installing. Once installed:
+See **[INSTALL.md](INSTALL.md)** for building and installing. It includes
+preparing an SD card with an expanded ext4 partition and setting up AdGuard
+Home. Once installed:
 
 ```sh
 r3s-policy devices                      # registered devices
 r3s-policy unresolved                   # MACs seen but not yet assigned
-r3s-policy add-device --name laptop-1 --group Kids --mac aa:bb:cc:dd:ee:ff   # groups: Personal, Kids, IoT
+r3s-policy add-device --name laptop-1 --group Kids --mac aa:bb:cc:dd:ee:ff   # r3s-policy groups
 r3s-policy add --name "bedtime" --type schedule --service internet \
     --days 0,1,2,3,4 --start 1320 --end 420 --devices 1      # 22:00-07:00 Sun-Thu
 r3s-policy add --name "games" --type service_quota --service custom \
@@ -88,6 +98,10 @@ All settings live in `/etc/config/r3s-accounting`.
 
 | Option | Default | Meaning |
 |---|---|---|
+| `groups` | `Personal Kids IoT` | Device groups that can be assigned |
+| `report_hourly_groups` | `Kids` | Groups shown hour by hour in reports |
+| `report_device_groups` | `IoT` | Groups listed device by device in reports |
+| `interval` | `60` | Seconds between samples and between policy evaluations |
 | `retention_days` | `14` | Days of history kept |
 | `lan_device` | auto (`network.lan.device`) | LAN interface(s) to measure, space-separated |
 | `wan_device` | auto (`pppoe-wan` for PPPoE, else `network.wan.device`) | WAN interface(s), space-separated |
@@ -109,8 +123,11 @@ ship or overwrite it. An example is in
 
 - **Nothing listens on the network.** The LuCI page uses LuCI's normal
   authentication.
-- **Read-only LuCI users** only get `/usr/bin/r3s-policy-ro`, which allows the
-  five viewing subcommands with no options.
+- **Read-only LuCI users** only get `/usr/bin/r3s-policy-ro` (viewing
+  subcommands, no options) and `/usr/bin/r3s-telegram-status`.
+- **The Telegram token** is stored root-only (mode 600) and never shown or
+  passed on a command line. Token and chat ID are validated, because the
+  report scripts source that file.
 - **Untrusted input is validated before it reaches nft:**
   - addresses are parsed with `ipaddress`;
   - domains are checked against a hostname pattern;
@@ -126,6 +143,7 @@ tests/ipv6_netns_e2e.sh          # real traffic through the rules, collector and
                                  # in throwaway network namespaces (rootless)
 tests/test_render_nft.sh         # interface-name rendering and validation
 tests/test_registry_upgrade.sh   # install / upgrade registry handling
+python3 tests/test_telegram_setup.py   # Telegram setup against a fake curl
 python3 tests/test_ipv6_units.py
 python3 tests/collector_undercount_sim.py
 ```

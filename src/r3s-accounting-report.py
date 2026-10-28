@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: GPL-2.0-only
 # Copyright (C) 2026 Graype
-"""R3S accounting reports.
+"""Traffic accounting reports.
 
 Daily reports are selected by local calendar-day offset:
   daily       -> today
@@ -9,9 +9,10 @@ Daily reports are selected by local calendar-day offset:
   ...
   daily -14   -> fourteen days ago
 
-The daily Kids view shows every enabled device in the ``Kids`` group as a
-24-hour grid. Device names are configuration data and are never used to decide
-which Kids devices belong in the report.
+Groups come from the devices themselves. In /etc/config/r3s-accounting,
+``report_hourly_groups`` (default ``Kids``) get a per-device 24-hour grid and
+``report_device_groups`` (default ``IoT``) get a per-device list; every other
+group gets a one-line summary. Device names never decide group membership.
 """
 from __future__ import annotations
 
@@ -25,6 +26,29 @@ BAR_WIDTH = 20
 TELEGRAM_SPARK_CHARS = "▁▂▃▄▅▆▇█"
 MARKDOWN_V2_SPECIALS = re.compile(r"([_\\*\[\]\(\)~`>#+\-=|{}.!\\\\])")
 DEVICE_MARKERS = ("🔵", "🟢", "🟠", "🟣", "🔴", "🟡", "⚪", "🟤")
+ACCOUNTING_UCI = "/etc/config/r3s-accounting"
+
+
+def uci_list(name: str, default: list[str]) -> list[str]:
+    """Space-separated option from /etc/config/r3s-accounting (default if unset)."""
+    try:
+        text = open(ACCOUNTING_UCI, encoding="utf-8").read()
+    except OSError:
+        return default
+    match = re.search(rf"option\s+{re.escape(name)}\s+['\"]?([^'\"\n]*)", text)
+    values = match.group(1).split() if match else []
+    return values or default
+
+
+def report_groups(conn: sqlite3.Connection) -> tuple[list[str], list[str], list[str]]:
+    """(hourly-grid groups, summary groups, per-device groups) for reports."""
+    present = [str(r["group_name"]) for r in rows(
+        conn, "SELECT DISTINCT group_name FROM devices WHERE enabled=1")]
+    order = uci_list("groups", ["Personal", "Kids", "IoT"])
+    present.sort(key=lambda g: (order.index(g) if g in order else len(order), g))
+    hourly = [g for g in uci_list("report_hourly_groups", ["Kids"]) if g in present]
+    detail = [g for g in uci_list("report_device_groups", ["IoT"]) if g in present]
+    return hourly, [g for g in present if g not in hourly], detail
 
 
 def fmt_bytes(value: int) -> str:
@@ -123,12 +147,13 @@ def print_status(known_rx: int, known_tx: int, unresolved_rx: int, unresolved_tx
     print()
 
 
-def print_kids(conn: sqlite3.Connection, date: str) -> None:
+def print_hourly_grid(conn: sqlite3.Connection, date: str, group: str) -> None:
     selected = rows(
         conn,
         """SELECT device_id,name FROM devices
-           WHERE enabled=1 AND group_name='Kids'
+           WHERE enabled=1 AND group_name=?
            ORDER BY name,device_id""",
+        (group,),
     )
     if not selected:
         return
@@ -136,11 +161,11 @@ def print_kids(conn: sqlite3.Connection, date: str) -> None:
         SELECT d.device_id,d.name,uh.local_hour,
                COALESCE(uh.rx_bytes,0)+COALESCE(uh.tx_bytes,0) AS total
         FROM usage_hourly uh JOIN devices d ON d.device_id=uh.device_id
-        WHERE uh.local_date=? AND d.enabled=1 AND d.group_name='Kids'
+        WHERE uh.local_date=? AND d.enabled=1 AND d.group_name=?
         ORDER BY uh.local_hour,d.device_id
-    """,(date,))
+    """,(date,group))
     vals={(int(r["device_id"]),int(r["local_hour"])):int(r["total"]) for r in data}
-    print("KIDS — HOURLY BANDWIDTH")
+    print(f"{group.upper()} — HOURLY BANDWIDTH")
     print("────────────────────────────────────────────────────────────────────────────")
     width=max(16, max(len(str(r["name"])) + 2 for r in selected))
     print(f"{'Hour':<6}"+"".join(f"{r['name']:<{width}}" for r in selected))
@@ -417,12 +442,8 @@ def print_telegram_hourly_group(
     print()
 
 
-def print_telegram_kids(conn: sqlite3.Connection, date: str, known) -> None:
-    print_telegram_hourly_group(conn, date, "Kids", "KIDS", known)
-
-
 def report_daily_telegram_health(conn: sqlite3.Connection, date: str) -> None:
-    print(f"📈 *R3S ROUTER HEALTH*\n{markdown_v2(date)}\n")
+    print(f"📈 *ROUTER HEALTH*\n{markdown_v2(date)}\n")
     if not print_telegram_router_health(conn, date):
         print("No recorded router health for this date\n")
 
@@ -434,17 +455,20 @@ def report_daily_telegram(conn: sqlite3.Connection, date: str) -> None:
     unresolved_rx = sum(int(r["rx"]) for r in unresolved)
     unresolved_tx = sum(int(r["tx"]) for r in unresolved)
     unresolved_total = unresolved_rx + unresolved_tx
-    print(f"📊 *R3S DAILY BANDWIDTH*\n{markdown_v2(date)}\n")
+    print(f"📊 *DAILY BANDWIDTH*\n{markdown_v2(date)}\n")
     print("*SUMMARY*")
     print(f"↓ Download: {markdown_v2(fmt_bytes(known_rx + unresolved_rx))}")
     print(f"↑ Upload: {markdown_v2(fmt_bytes(known_tx + unresolved_tx))}")
     print(f"Total: {markdown_v2(fmt_bytes(ot))}")
     print(f"Unresolved: {markdown_v2(fmt_bytes(unresolved_total))} — {len(unresolved)} clients")
     print("Quota alerts: None\n")
-    print_telegram_kids(conn, date, known)
-    telegram_group_summary(known, "Personal", "PERSONAL", conn)
-    telegram_group_summary(known, "IoT", "IOT", conn)
-    print_telegram_hourly_group(conn, date, "IoT", "IOT", known)
+    hourly, summary, detail = report_groups(conn)
+    for group in hourly:
+        print_telegram_hourly_group(conn, date, group, group.upper(), known)
+    for group in summary:
+        telegram_group_summary(known, group, group.upper(), conn)
+    for group in detail:
+        print_telegram_hourly_group(conn, date, group, group.upper(), known)
     print("*NEW / UNRESOLVED*")
     if not unresolved:
         print("None\n")
@@ -463,21 +487,22 @@ def report_daily_telegram(conn: sqlite3.Connection, date: str) -> None:
 
 def report_daily(conn: sqlite3.Connection, date: str) -> None:
     known,unresolved,kt,ut,ot=daily_totals(conn,date)
-    print(f"R3S DAILY BANDWIDTH — {date}")
+    print(f"DAILY BANDWIDTH — {date}")
     print("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n")
     known_rx=sum(int(r["rx"]) for r in known)
     known_tx=sum(int(r["tx"]) for r in known)
     unresolved_rx=sum(int(r["rx"]) for r in unresolved)
     unresolved_tx=sum(int(r["tx"]) for r in unresolved)
-    print_status(known_rx,known_tx,unresolved_rx,unresolved_tx,len(unresolved)); print_kids(conn,date)
-    print_group_summary(known,"Personal","PERSONAL",conn)
-    print_group_summary(known,"IoT","IOT",conn)
-    print_device_usage(known,"IoT","IOT",conn)
+    print_status(known_rx,known_tx,unresolved_rx,unresolved_tx,len(unresolved))
+    hourly, summary, detail = report_groups(conn)
+    for group in hourly: print_hourly_grid(conn,date,group)
+    for group in summary: print_group_summary(known,group,group.upper(),conn)
+    for group in detail: print_device_usage(known,group,group.upper(),conn)
     print_unresolved(unresolved); print_alerts(unresolved)
 
 
 def report_unresolved(conn):
-    print("R3S ACCOUNTING — UNRESOLVED TRAFFIC\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n")
+    print("UNRESOLVED TRAFFIC\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n")
     data=rows(conn,"""SELECT local_date,ip,COALESCE(SUM(rx_bytes),0) rx,COALESCE(SUM(tx_bytes),0) tx,COALESCE(SUM(rx_bytes+tx_bytes),0) total FROM unresolved_usage GROUP BY local_date,ip ORDER BY local_date DESC,total DESC,ip""")
     if not data: print("None")
     for r in data: print(f"{r['local_date']:<12} {r['ip']:<16} ↓ {fmt_bytes(int(r['rx'])):>10} ↑ {fmt_bytes(int(r['tx'])):>10} TOTAL {fmt_bytes(int(r['total']))}")
@@ -485,7 +510,7 @@ def report_unresolved(conn):
 
 
 def report_hourly(conn,period,device=None):
-    print(f"R3S HOURLY BANDWIDTH — {period.upper()}{' — '+device if device else ''}\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n")
+    print(f"HOURLY BANDWIDTH — {period.upper()}{' — '+device if device else ''}\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n")
     if period in ("today","yesterday"):
         date=report_date(0 if period=="today" else -1); condition="uh.local_date=?"; base=(date,)
     else:
@@ -562,7 +587,7 @@ def report_destinations(
     """
     data = rows(conn, sql, tuple(base_args + [minimum_bytes, limit]))
     print(
-        f"R3S DESTINATION BANDWIDTH — {title}"
+        f"DESTINATION BANDWIDTH — {title}"
         f"{' — ' + device if device else ''}\n"
         "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
     )
@@ -583,7 +608,7 @@ def report_destinations(
 
 
 def main():
-    parser=argparse.ArgumentParser(description="R3S accounting reports")
+    parser=argparse.ArgumentParser(description="Traffic accounting reports")
     parser.add_argument("--db",default=DB_DEFAULT)
     sub=parser.add_subparsers(dest="command",required=True)
     p=sub.add_parser("daily",help="Daily report; offset 0 to -14")
