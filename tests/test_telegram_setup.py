@@ -13,7 +13,9 @@ from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[1]
 SETUP = REPO / "scripts/telegram-setup.py"
-TOKEN = "123456789:AAEabcdefghijklmnopqrstuvwxyz012345"
+# Fake test token: 7 digits, so it passes our check (5-15 digits) but does
+# not look like a real Telegram token to secret scanners (8-10 digits).
+TOKEN = "1234567:AAEabcdefghijklmnopqrstuvwxyz012345"
 FAKE_CURL = r'''#!/usr/bin/env python3
 import json, os, sys
 log = os.environ["FAKE_LOG"]
@@ -22,7 +24,7 @@ with open(log, "a") as f:
     f.write(json.dumps({"argv": sys.argv, "config": config}) + "\n")
 url = [l for l in config.splitlines() if l.startswith("url")][0]
 method = url.rstrip('"').rsplit("/", 1)[1]
-if "BADTOKEN" in url or "000000000:" in url:
+if "BADTOKEN" in url or "0000000:" in url:
     print(json.dumps({"ok": False, "description": "Unauthorized"})); sys.exit(0)
 replies = {
     "getMe": {"ok": True, "result": {"username": "test_quota_bot"}},
@@ -70,7 +72,7 @@ def main() -> None:
         check(f"rejects {bad.strip()!r} and keeps the old secrets",
               r.returncode == 1 and (work / "secrets").read_text() == before and not (work / "secrets.new").exists())
 
-    pending("TELEGRAM_BOT_TOKEN=000000000:AAEabcdefghijklmnopqrstuvwxyz012345\n")
+    pending("TELEGRAM_BOT_TOKEN=0000000:AAEabcdefghijklmnopqrstuvwxyz012345\n")
     r = run("apply")
     check("a token Telegram rejects is not saved", r.returncode == 1 and TOKEN in (work / "secrets").read_text())
 
