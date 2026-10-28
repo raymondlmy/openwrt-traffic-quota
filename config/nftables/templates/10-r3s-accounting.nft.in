@@ -1,0 +1,101 @@
+# Traffic accounting is a separate inet table, included before fw4's table.
+# TEMPLATE: r3s-accounting-render-nft replaces @LAN_IFACES@/@WAN_IFACES@ from
+# /etc/config/r3s-accounting and writes the result to
+# /usr/share/nftables.d/ruleset-pre/10-r3s-accounting.nft.
+# It only measures forwarded IPv4 and IPv6 traffic; it never accepts or drops
+# traffic. IPv6 uses separate sets because nft set elements have one family.
+
+# add-then-delete instead of 'destroy table' (which needs kernel 6.3+).
+table inet r3s_accounting
+delete table inet r3s_accounting
+
+table inet r3s_accounting {
+    set tx_by_ip {
+        type ipv4_addr
+        flags dynamic
+        timeout 365d
+        size 4096
+    }
+
+    set rx_by_ip {
+        type ipv4_addr
+        flags dynamic
+        timeout 365d
+        size 4096
+    }
+
+    # Per-client/per-destination IPv4 counters. These are sampled by the
+    # collector and retained only as hourly SQLite aggregates.
+    set tx_by_destination {
+        type ipv4_addr . ipv4_addr
+        flags dynamic
+        timeout 2d
+        size 32768
+    }
+
+    set rx_by_destination {
+        type ipv4_addr . ipv4_addr
+        flags dynamic
+        timeout 2d
+        size 32768
+    }
+
+    # IPv6 clients rotate temporary (privacy) addresses, typically daily, so
+    # idle addresses expire after a week instead of a year. The collector
+    # treats an expired element like any other removed element.
+    set tx_by_ip6 {
+        type ipv6_addr
+        flags dynamic
+        timeout 7d
+        size 16384
+    }
+
+    set rx_by_ip6 {
+        type ipv6_addr
+        flags dynamic
+        timeout 7d
+        size 16384
+    }
+
+    set tx_by_destination6 {
+        type ipv6_addr . ipv6_addr
+        flags dynamic
+        timeout 2d
+        size 32768
+    }
+
+    set rx_by_destination6 {
+        type ipv6_addr . ipv6_addr
+        flags dynamic
+        timeout 2d
+        size 32768
+    }
+
+    chain forward_accounting {
+        type filter hook forward priority filter - 1; policy accept;
+
+        iifname @LAN_IFACES@ oifname @WAN_IFACES@ \
+            update @tx_by_ip { ip saddr counter }
+
+        iifname @LAN_IFACES@ oifname @WAN_IFACES@ \
+            update @tx_by_destination { ip saddr . ip daddr counter }
+
+        iifname @WAN_IFACES@ oifname @LAN_IFACES@ \
+            update @rx_by_ip { ip daddr counter }
+
+        iifname @WAN_IFACES@ oifname @LAN_IFACES@ \
+            update @rx_by_destination { ip daddr . ip saddr counter }
+
+        iifname @LAN_IFACES@ oifname @WAN_IFACES@ \
+            update @tx_by_ip6 { ip6 saddr counter }
+
+        iifname @LAN_IFACES@ oifname @WAN_IFACES@ \
+            update @tx_by_destination6 { ip6 saddr . ip6 daddr counter }
+
+        iifname @WAN_IFACES@ oifname @LAN_IFACES@ \
+            update @rx_by_ip6 { ip6 daddr counter }
+
+        iifname @WAN_IFACES@ oifname @LAN_IFACES@ \
+            update @rx_by_destination6 { ip6 daddr . ip6 saddr counter }
+    }
+}

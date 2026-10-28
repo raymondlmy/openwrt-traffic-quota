@@ -1,0 +1,8 @@
+{
+  "version": 1,
+  "devices": [
+    {"device_id":1,"name":"phone-1","group_name":"Personal","enabled":true,"macs":["aa:bb:cc:00:00:01"]},
+    {"device_id":2,"name":"laptop-1","group_name":"Kids","enabled":true,"macs":["aa:bb:cc:00:00:02","aa:bb:cc:00:00:03"]},
+    {"device_id":3,"name":"tv-1","group_name":"IoT","enabled":true,"macs":["aa:bb:cc:00:00:04"]}
+  ]
+}

@@ -1,0 +1,8 @@
+{
+  "admin/services/r3s-policy": {
+    "title": "Traffic Quotas",
+    "order": 85,
+    "action": { "type": "view", "path": "r3s-policy" },
+    "depends": { "acl": [ "luci-app-r3s-policy" ] }
+  }
+}

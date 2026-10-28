@@ -1,0 +1,54 @@
+#!/bin/sh /etc/rc.common
+# Traffic accounting persistent storage: bind-mounts data_dir onto /var/lib.
+START=90
+STOP=90
+
+# /var is a symlink to /tmp on OpenWrt, so the database lives in data_dir
+# (persistent storage) and is bind-mounted where the tools expect it.
+PERSISTENT_DIR="$(uci -q get r3s-accounting.main.data_dir || true)"
+PERSISTENT_DIR="${PERSISTENT_DIR:-/opt/r3s-accounting/data}"
+RUNTIME_DIR="/tmp/lib/r3s-accounting"
+
+is_mounted() {
+    grep -q " $RUNTIME_DIR " /proc/mounts
+}
+
+start() {
+    mkdir -p "$PERSISTENT_DIR"
+    mkdir -p "$RUNTIME_DIR"
+
+    if [ ! -f "$PERSISTENT_DIR/accounting.sqlite3" ]; then
+        logger -t r3s-accounting-storage \
+            "ERROR: persistent accounting database is missing"
+        return 1
+    fi
+
+    if is_mounted; then
+        if [ -f "$RUNTIME_DIR/accounting.sqlite3" ]; then
+            return 0
+        fi
+        umount "$RUNTIME_DIR" || return 1
+    fi
+
+    mount --bind "$PERSISTENT_DIR" "$RUNTIME_DIR" || {
+        logger -t r3s-accounting-storage \
+            "ERROR: bind mount failed"
+        return 1
+    }
+
+    if [ ! -f "$RUNTIME_DIR/accounting.sqlite3" ]; then
+        logger -t r3s-accounting-storage \
+            "ERROR: database missing after bind mount"
+        umount "$RUNTIME_DIR"
+        return 1
+    fi
+
+    logger -t r3s-accounting-storage \
+        "persistent accounting storage mounted"
+}
+
+stop() {
+    if is_mounted; then
+        umount "$RUNTIME_DIR"
+    fi
+}

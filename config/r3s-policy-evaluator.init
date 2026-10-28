@@ -1,0 +1,16 @@
+#!/bin/sh /etc/rc.common
+
+START=97
+USE_PROCD=1
+
+start_service() {
+    local querylog
+    querylog="$(uci -q get r3s-accounting.main.adguard_querylog || true)"
+    procd_open_instance
+    # The path is passed as $1 to the loop, never interpolated into the script.
+    procd_set_param command /bin/sh -c \
+        'while true; do /usr/bin/r3s-policy-evaluator ${1:+--adguard-querylog "$1"} >/dev/null 2>&1 || logger -t r3s-policy "policy evaluator failed"; sleep 60; done' \
+        r3s-policy-evaluator "$querylog"
+    procd_set_param respawn 3600 5 0
+    procd_close_instance
+}

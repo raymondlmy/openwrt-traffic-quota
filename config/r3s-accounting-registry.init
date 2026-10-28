@@ -1,0 +1,17 @@
+#!/bin/sh /etc/rc.common
+# R3S Accounting device registry v1.0.0
+START=94
+USE_PROCD=0
+
+start() {
+    /etc/init.d/r3s-accounting-storage start || return 1
+    [ -f /etc/r3s-accounting/devices.json ] || {
+        logger -t r3s-accounting-registry "no /etc/r3s-accounting/devices.json; skipping provisioning"
+        return 0
+    }
+    /usr/bin/r3s-accounting-provision-devices
+}
+
+stop() {
+    return 0
+}

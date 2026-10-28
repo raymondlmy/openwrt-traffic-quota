@@ -1,0 +1,38 @@
+{
+  "luci-app-r3s-policy": {
+    "description": "Traffic quota and device policy management",
+    "read": {
+      "file": {
+        "/usr/bin/r3s-policy-ro": [
+          "exec"
+        ],
+        "/usr/bin/r3s-policy-ro *": [
+          "exec"
+        ]
+      },
+      "ubus": {
+        "file": [
+          "exec"
+        ],
+        "session": [
+          "access"
+        ]
+      }
+    },
+    "write": {
+      "file": {
+        "/usr/bin/r3s-policy": [
+          "exec"
+        ],
+        "/usr/bin/r3s-policy *": [
+          "exec"
+        ]
+      },
+      "ubus": {
+        "file": [
+          "exec"
+        ]
+      }
+    }
+  }
+}

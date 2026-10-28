@@ -1,0 +1,72 @@
+# Isolated policy enforcement path. Sets are intentionally empty until the
+# evaluator is enabled; this chain must never become a routing dependency.
+# add-then-delete instead of 'destroy table' (which needs kernel 6.3+).
+table inet r3s_policy
+delete table inet r3s_policy
+
+table inet r3s_policy {
+    set custom_dst {
+        type ipv4_addr
+        flags dynamic, timeout
+        timeout 10m
+        size 4096
+    }
+
+    set custom_quota_src {
+        type ipv4_addr
+        counter
+        size 512
+    }
+
+    set custom_quota_dst {
+        type ipv4_addr
+        counter
+        size 512
+    }
+
+    set blocked_internet_src {
+        type ipv4_addr
+        size 256
+    }
+
+    set blocked_custom_pair {
+        type ipv4_addr . ipv4_addr
+        flags dynamic, timeout
+        timeout 1d
+        size 4096
+    }
+
+    # IPv6 enforcement keys clients by MAC, not address: temporary IPv6
+    # addresses rotate and a new one can be used before the evaluator's next
+    # pass sees it in the neighbour table. The registry MACs are stable.
+    set custom_dst6 {
+        type ipv6_addr
+        flags dynamic, timeout
+        timeout 10m
+        size 4096
+    }
+
+    set blocked_internet_mac6 {
+        type ether_addr
+        size 256
+    }
+
+    set blocked_custom_pair6 {
+        type ether_addr . ipv6_addr
+        flags dynamic, timeout
+        timeout 1d
+        size 4096
+    }
+
+    chain forward_policy {
+        type filter hook forward priority filter - 2; policy accept;
+        ip saddr @blocked_internet_src counter drop
+        ip saddr . ip daddr @blocked_custom_pair meta l4proto tcp counter reject with tcp reset
+        ip saddr . ip daddr @blocked_custom_pair counter drop
+        meta nfproto ipv6 ether saddr @blocked_internet_mac6 counter drop
+        meta nfproto ipv6 ether saddr . ip6 daddr @blocked_custom_pair6 meta l4proto tcp counter reject with tcp reset
+        meta nfproto ipv6 ether saddr . ip6 daddr @blocked_custom_pair6 counter drop
+        ip saddr @custom_quota_src ip daddr @custom_dst counter
+        ip saddr @custom_dst ip daddr @custom_quota_dst counter
+    }
+}

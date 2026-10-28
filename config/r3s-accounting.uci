@@ -1,0 +1,16 @@
+config accounting 'main'
+    # Days of history kept in the database.
+    option retention_days '14'
+    # Interfaces to measure between (space-separated names allowed).
+    # Empty = auto-detect: LAN from network.lan.device, WAN "pppoe-wan" for
+    # PPPoE, otherwise network.wan.device. Run r3s-accounting-render-nft and
+    # restart the firewall after changing.
+    option lan_device ''
+    option wan_device ''
+    # Persistent database directory. Must be real storage (SD card, eMMC, USB
+    # or SSD), not the flash overlay: the database is written every minute.
+    option data_dir '/opt/r3s-accounting/data'
+    # AdGuard Home query log for per-site (custom domain) quotas. Empty =
+    # auto-detect /opt/adguardhome or /var/lib/adguardhome. Without AdGuard,
+    # schedules and whole-device blocks work but per-site quotas never charge.
+    option adguard_querylog ''
