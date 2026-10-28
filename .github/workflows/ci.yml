@@ -19,7 +19,7 @@ jobs:
           shellcheck --version
           shellcheck -S error -s sh scripts/*.sh config/*.init packages/*/*.sh
           shellcheck -S error -s bash tests/*.sh
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.13"
       - name: Python (ruff, errors only)
