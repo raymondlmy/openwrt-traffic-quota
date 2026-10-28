@@ -1,5 +1,7 @@
 # openwrt-traffic-quota
 
+[![CI](https://github.com/raymondlmy/openwrt-traffic-quota/actions/workflows/ci.yml/badge.svg)](https://github.com/raymondlmy/openwrt-traffic-quota/actions/workflows/ci.yml)
+
 Per-device traffic accounting, internet schedules and per-site daily quotas
 for OpenWrt routers, over **IPv4 and IPv6**.
 
@@ -149,6 +151,10 @@ python3 tests/collector_undercount_sim.py
 ```
 
 Rootless namespaces need `unshare -rn` to work (most desktop Linux distros).
+
+## Reporting security issues
+
+Please report privately; see [SECURITY.md](SECURITY.md).
 
 ## License
 

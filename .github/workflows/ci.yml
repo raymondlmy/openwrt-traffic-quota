@@ -1,0 +1,57 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Shell scripts (shellcheck, errors only)
+        run: |
+          shellcheck --version
+          shellcheck -S error -s sh scripts/*.sh config/*.init packages/*/*.sh
+          shellcheck -S error -s bash tests/*.sh
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Python (ruff, errors only)
+        run: |
+          pip install ruff==0.6.9
+          ruff check --select E9,F63,F7,F82 --target-version py311 src scripts tests
+      - name: Python compiles
+        run: python -m py_compile src/*.py scripts/*.py tests/*.py
+      - name: JSON files are valid
+        run: |
+          for f in config/luci/acl.d/*.json config/luci/menu.d/*.json config/devices.example.json; do
+            python -m json.tool "$f" >/dev/null || { echo "invalid JSON: $f"; exit 1; }
+          done
+      - name: Package versions have changelog entries
+        run: sh scripts/check-package-versioning.sh
+
+  test:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install nftables
+        run: sudo apt-get update -q && sudo apt-get install -y -q nftables
+      - name: Unit tests
+        run: |
+          python3 tests/test_ipv6_units.py
+          python3 tests/test_groups.py
+          python3 tests/test_telegram_setup.py
+          python3 tests/collector_undercount_sim.py
+          bash tests/test_registry_upgrade.sh
+      # Ubuntu 24.04 restricts unprivileged user namespaces, so the
+      # network-namespace tests run as root here (still fully isolated).
+      - name: nft rule rendering and loading
+        run: sudo -E bash tests/test_render_nft.sh
+      - name: IPv4 + IPv6 end-to-end (network namespaces)
+        run: sudo -E bash tests/ipv6_netns_e2e.sh
