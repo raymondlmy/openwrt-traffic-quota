@@ -13,7 +13,7 @@ jobs:
   lint:
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Shell scripts (shellcheck, errors only)
         run: |
           shellcheck --version
@@ -39,7 +39,7 @@ jobs:
   test:
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Install nftables
         run: sudo apt-get update -q && sudo apt-get install -y -q nftables
       - name: Unit tests
