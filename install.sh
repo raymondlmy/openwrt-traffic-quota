@@ -93,7 +93,19 @@ fi
 # ---- download and verify ----
 WORK="$(mktemp -d /tmp/otq-install.XXXXXX)"
 trap 'rm -rf "$WORK"' EXIT INT TERM
-fetch() { wget -q -O "$2" "$1" || die "download failed: $1"; }
+# curl when present (follows GitHub's redirects and tries every address);
+# otherwise OpenWrt's wget (uclient-fetch). Three attempts either way.
+fetch() {
+    for attempt in 1 2 3; do
+        if command -v curl >/dev/null 2>&1; then
+            curl -fsSL --connect-timeout 15 --max-time 120 -o "$2" "$1" && return 0
+        else
+            wget -q -T 20 -O "$2" "$1" && return 0
+        fi
+        [ "$attempt" -lt 3 ] && sleep 2
+    done
+    die "download failed: $1 (no internet or GitHub unreachable? Try: apk add curl, or download the files and use --from DIR)"
+}
 
 if [ -n "$FROM" ]; then
     [ -r "$FROM/SHA256SUMS" ] || die "$FROM/SHA256SUMS not found"

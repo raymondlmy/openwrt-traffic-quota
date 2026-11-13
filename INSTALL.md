@@ -12,6 +12,12 @@ installs with `apk` (dependencies included). It does not set up storage or
 AdGuard Home: do steps 2 and 3 below first if you need them, then run it and
 continue at step 6. The rest of this page is the manual route.
 
+If a download times out, run `apk update && apk add curl` and try again (the
+installer then uses curl, which copes better with GitHub's redirects), or
+download the `.apk` files and `SHA256SUMS` from the
+[release page](https://github.com/raymondlmy/openwrt-traffic-quota/releases/latest)
+on a PC, copy them to the router and run `sh /tmp/install.sh --from DIR`.
+
 1. [Packages you need](#1-packages-you-need)
 2. [Storage: flash the SD card and expand the ext4 partition](#2-storage-flash-the-sd-card-and-expand-the-ext4-partition)
 3. [Optional: AdGuard Home (for per-site quotas)](#3-optional-adguard-home-for-per-site-quotas)
