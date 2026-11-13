@@ -47,6 +47,17 @@ HELP = """Commands:
 NAME can be the start of a name, e.g. /extend slap 30m"""
 
 
+# Shown in Telegram's "/" menu (setMyCommands), so the commands need no memorising.
+MENU = [
+    ("status", "What is blocked right now, and why"),
+    ("extend", "Extra time: /extend NAME 30m (or 2h, 23:00)"),
+    ("block", "Block a device: /block NAME [30m|2h|23:00]"),
+    ("unblock", "Remove your block or extra time: /unblock NAME"),
+    ("devices", "Device names"),
+    ("help", "How to use these commands"),
+]
+
+
 class BotError(Exception):
     pass
 
@@ -115,7 +126,7 @@ def devices() -> list[tuple[int, str, str]]:
 
 
 def find_device(name: str) -> tuple[int, str]:
-    wanted = " ".join(name.split()).lower()
+    wanted = " ".join(name.strip().strip("'\"‘’“”").split()).lower()
     if not wanted:
         raise BotError("Which device? Send /devices for the names.")
     rows = devices()
@@ -338,6 +349,7 @@ def main() -> int:
     offset = load_offset()
     intruders: dict[str, float] = {}
     backoff = 10
+    menu_for = ""  # token the menu was registered for
     while True:
         token, chat = read_secrets()
         if not token or not chat or not re.fullmatch(r"[0-9]{1,20}", chat):
@@ -345,6 +357,10 @@ def main() -> int:
             time.sleep(60)
             continue
         try:
+            if menu_for != token:
+                commands = [{"command": c, "description": d} for c, d in MENU]
+                api(token, "setMyCommands", {"commands": json.dumps(commands)})
+                menu_for = token
             report_expiries(token, chat)
             updates = api(token, "getUpdates", {"offset": str(offset), "timeout": str(POLL_SECONDS),
                                                 "allowed_updates": '["message"]'},

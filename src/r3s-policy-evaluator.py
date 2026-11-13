@@ -208,6 +208,48 @@ def _query_time(value: str) -> int | None:
         return None
 
 
+_LOG_TIME_RE = re.compile(rb'"T"\s*:\s*"([^"]+)"')
+SEEK_MARGIN = 15 * 60  # start this much before the window: tolerates slightly unordered flushes
+
+
+def _line_time(line: bytes) -> int | None:
+    match = _LOG_TIME_RE.search(line)
+    return _query_time(match.group(1).decode("ascii", "replace")) if match else None
+
+
+def seek_log_time(handle: Any, start_time: int) -> int:
+    """Byte offset of a line at or shortly before start_time in a time-ordered log.
+
+    AdGuard appends entries in time order, so a binary search over byte
+    offsets finds the window in ~20 short reads instead of decoding the whole
+    file (hundreds of MB late in its rotation week). Errs early, never late:
+    on anything unparseable it keeps the lower bound.
+    """
+    handle.seek(0, os.SEEK_END)
+    low, high = 0, handle.tell()
+    while high - low > 65536:
+        middle = (low + high) // 2
+        handle.seek(middle)
+        handle.readline()  # skip the partial line
+        observed = None
+        for _ in range(8):  # a few lines in case one has no parseable time
+            line = handle.readline()
+            if not line:
+                break
+            observed = _line_time(line)
+            if observed is not None:
+                break
+        if observed is not None and observed < start_time:
+            low = middle
+        else:
+            high = middle
+    if low:
+        handle.seek(low)
+        handle.readline()
+        return handle.tell()
+    return 0
+
+
 def load_recent_dns_evidence(
     path: str, now: int, custom_rows: list[sqlite3.Row],
     ip_devices: dict[str, int] | None = None,
@@ -231,13 +273,23 @@ def load_recent_dns_evidence(
     custom: dict[tuple[int, str], set[str]] = {}
     custom_times: dict[tuple[int, str, str], dict[str, set[int]]] = {}
     device_times: dict[tuple[int, int, str], dict[str, set[int]]] = {}
+    # 'example.com' in a policy matches example.com and any subdomain.
+    policies_by_domain: dict[str, set[int]] = {}
+    for policy_id, domains in domains_by_policy.items():
+        for configured in domains:
+            policies_by_domain.setdefault(configured, set()).add(policy_id)
+    window_start = now - CUSTOM_DNS_EVIDENCE_WINDOW
+    if not policies_by_domain:
+        return custom, custom_times, device_times
     try:
-        handle = open(path, encoding="utf-8")
+        handle = open(path, "rb")
     except OSError:
         return custom, custom_times, device_times
     with handle:
-        for line in handle:
+        handle.seek(seek_log_time(handle, window_start - SEEK_MARGIN))
+        for raw in handle:
             try:
+                line = raw.decode("utf-8")
                 record = json.loads(line)
                 if not isinstance(record, dict):
                     continue
@@ -245,7 +297,15 @@ def load_recent_dns_evidence(
                 client = str(record.get("IP", ""))
                 domain = str(record.get("QH", "")).lower().rstrip(".")
                 if (observed_at is None or observed_at > now
-                        or observed_at < now - max(DNS_EVIDENCE_WINDOW, CUSTOM_DNS_EVIDENCE_WINDOW)):
+                        or observed_at < now - CUSTOM_DNS_EVIDENCE_WINDOW):
+                    continue
+                # Match the domain before decoding the answer: almost no
+                # queries belong to a site policy, and decoding is the cost.
+                labels = domain.split(".")
+                matched = set().union(*(
+                    policies_by_domain.get(".".join(labels[i:]), ()) for i in range(len(labels))
+                ))
+                if not matched:
                     continue
                 client = str(ipaddress.ip_address(client))
                 answers = _dns_a_answers(str(record.get("Answer", "")))
@@ -253,20 +313,17 @@ def load_recent_dns_evidence(
                 continue
             if not answers:
                 continue
-            if observed_at >= now - CUSTOM_DNS_EVIDENCE_WINDOW:
-                for policy_id, domains in domains_by_policy.items():
-                    if any(domain == configured or domain.endswith("." + configured)
-                           for configured in domains):
-                        custom.setdefault((policy_id, client), set()).update(answers)
-                        device_id = ip_devices.get(client)
-                        for destination in answers:
-                            custom_times.setdefault(
-                                (policy_id, client, destination), {}
-                            ).setdefault(domain, set()).add(observed_at)
-                            if device_id is not None:
-                                device_times.setdefault(
-                                    (policy_id, device_id, destination), {}
-                                ).setdefault(domain, set()).add(observed_at)
+            device_id = ip_devices.get(client)
+            for policy_id in sorted(matched):
+                custom.setdefault((policy_id, client), set()).update(answers)
+                for destination in answers:
+                    custom_times.setdefault(
+                        (policy_id, client, destination), {}
+                    ).setdefault(domain, set()).add(observed_at)
+                    if device_id is not None:
+                        device_times.setdefault(
+                            (policy_id, device_id, destination), {}
+                        ).setdefault(domain, set()).add(observed_at)
     return custom, custom_times, device_times
 
 
@@ -502,20 +559,26 @@ def sample_custom_usage_from_accounting(
         (today, DESTINATION_BUCKET_SECONDS, today),
     ).fetchall()
 
+    # Reset points change only via r3s-policy reset-quota; read today's once
+    # instead of once per usage row and policy (tens of thousands of queries).
+    reset_at = {
+        (int(r["policy_id"]), int(r["device_id"])): int(r["reset_at"])
+        for r in con.execute(
+            "SELECT policy_id,device_id,reset_at FROM policy_usage_reset_points WHERE period_start=?",
+            (today,),
+        )
+    }
+    policy_ids = [int(policy["policy_id"]) for policy in policy_rows]
+
     for usage in usage_rows:
         device_id = int(usage["device_id"])
         client_ip = str(usage["client_ip"])
         destination_ip = str(usage["destination_ip"])
         bucket_start = int(usage["bucket_start_utc"])
         bucket_seconds = int(usage["bucket_seconds"])
-        for policy in policy_rows:
-            policy_id = int(policy["policy_id"])
-            reset = con.execute(
-                """SELECT reset_at FROM policy_usage_reset_points
-                   WHERE policy_id=? AND device_id=? AND period_start=?""",
-                (policy_id, device_id, today),
-            ).fetchone()
-            if reset and bucket_start + bucket_seconds <= int(reset["reset_at"]):
+        for policy_id in policy_ids:
+            reset = reset_at.get((policy_id, device_id))
+            if reset is not None and bucket_start + bucket_seconds <= reset:
                 continue
             evidence_by_domain = custom_dns_times.get(
                 (policy_id, client_ip, destination_ip), {}

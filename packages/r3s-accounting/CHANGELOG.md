@@ -17,6 +17,13 @@
 - `r3s-policy evaluate` lists `device override` rows first and marks policy
   rows an override changed; `r3s-policy-ro overrides` for read-only users.
 - New option `telegram_bot` (default `0`) for the Telegram commands service.
+- Evaluator about 4x faster (58 s -> 14 s per run on the R3S): it decoded the
+  whole AdGuard query log every run (180-360 MB, 0.5-1 M lines) to use the
+  last 2 hours. It now binary-searches the time-ordered log for the window
+  start, matches the domain before decoding DNS answers, and reads quota reset
+  points once per run instead of once per usage row. Schedules and quotas
+  react within about 75 s instead of about 2 minutes. Verified on a frozen copy
+  of the live log: evidence identical to the previous version.
 
 ## 0.6.0-1 - 2026-10-28
 
