@@ -1,6 +1,6 @@
 # r3s-accounting-telegram changelog
 
-## 0.6.0-2 - 2026-11-13
+## 0.6.1-1 - 2026-11-13
 
 - Telegram commands (`r3s-telegram-bot`, off by default): `/status`,
   `/block NAME [30m|2h|23:00]`, `/extend NAME 30m|2h|23:00`, `/unblock NAME`,
@@ -12,6 +12,7 @@
   Commands queued for more than 2 minutes (bot or router down) are skipped,
   not replayed. Changes go through `r3s-policy`, then the evaluator's fast
   pass. Expired overrides are announced once.
+- Upgrades restart a running bot on the new code (post-install script).
 - `r3s-telegram-setup schedule --commands on|off`; `status` reports
   `commands`. `detect-chat` pauses the command service while it reads
   updates.

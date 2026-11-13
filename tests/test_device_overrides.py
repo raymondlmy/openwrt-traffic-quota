@@ -95,20 +95,20 @@ def main() -> None:
     check("load_overrides splits allow/block", allowed == {1} and blocked == {3})
 
     rows = ev.active_schedule_rows(con)
-    ips = {1: {"192.168.10.31"}, 2: {"192.168.10.32"}, 3: {"192.168.10.21"}}
+    ips = {1: {"192.168.1.31"}, 2: {"192.168.1.32"}, 3: {"192.168.1.21"}}
     macs = {1: {"aa:bb:cc:00:00:01"}, 2: {"aa:bb:cc:00:00:02"}, 3: {"aa:bb:cc:00:00:03"}}
     applied.clear()
     ev.decide_schedule_blocks(rows, ips, now, device_macs=macs, allowed_override=allowed, blocked_override=blocked)
     script = applied[-1]
     check("allowed device not in whole-device block (v4 and MAC)",
-          "192.168.10.31" not in script and "aa:bb:cc:00:00:01" not in script)
-    check("policy-blocked device still blocked", "192.168.10.32" in script and "aa:bb:cc:00:00:02" in script)
+          "192.168.1.31" not in script and "aa:bb:cc:00:00:01" not in script)
+    check("policy-blocked device still blocked", "192.168.1.32" in script and "aa:bb:cc:00:00:02" in script)
     check("block override blocks a device with no policy",
-          "192.168.10.21" in script and "aa:bb:cc:00:00:03" in script)
+          "192.168.1.21" in script and "aa:bb:cc:00:00:03" in script)
     applied.clear()
     ev.decide_schedule_blocks(rows, ips, now, device_macs=macs)
     check("without overrides: schedule blocks 1 and 2 only",
-          "192.168.10.31" in applied[-1] and "192.168.10.21" not in applied[-1])
+          "192.168.1.31" in applied[-1] and "192.168.1.21" not in applied[-1])
 
     # Custom-site block: an allowed device gets no pairs; another device does.
     con.execute("""INSERT INTO policy_rules(policy_id,name,policy_type,service,domains,quota_bytes,period,
@@ -120,9 +120,9 @@ def main() -> None:
     ev.decide_custom_blocks(con, quota_rows, [], ips, {2: {"93.184.215.14", "2606:2800:21f:cb07::1"}},
                             {}, now, macs, allowed_override={1})
     script = applied[-1]
-    check("site block skips allowed device", "192.168.10.31 . " not in script and "aa:bb:cc:00:00:01 . " not in script)
+    check("site block skips allowed device", "192.168.1.31 . " not in script and "aa:bb:cc:00:00:01 . " not in script)
     check("site block still applies to other device",
-          "192.168.10.32 . 93.184.215.14" in script and "aa:bb:cc:00:00:02 . 2606:2800:21f:cb07::1" in script)
+          "192.168.1.32 . 93.184.215.14" in script and "aa:bb:cc:00:00:02 . 2606:2800:21f:cb07::1" in script)
 
     # Expiry: logged once as 'expire', row removed, device no longer allowed.
     con.execute("UPDATE device_overrides SET expires_at=? WHERE device_id=1", (now - 5,))
@@ -144,19 +144,19 @@ def main() -> None:
 
     # ---- nft pair-set parsing and fast release ----
     listing = {"nftables": [{"metainfo": {}}, {"set": {"name": "blocked_custom_pair", "elem": [
-        {"concat": ["192.168.10.31", "93.184.215.14"]},
-        {"elem": {"val": {"concat": ["192.168.10.32", "93.184.215.14"]}, "timeout": 86400}},
-        {"concat": ["192.168.10.31", "not-an-ip"]},
+        {"concat": ["192.168.1.31", "93.184.215.14"]},
+        {"elem": {"val": {"concat": ["192.168.1.32", "93.184.215.14"]}, "timeout": 86400}},
+        {"concat": ["192.168.1.31", "not-an-ip"]},
     ]}}]}
     ev.run_command = lambda command, stdin=None: subprocess.CompletedProcess(command, 0, json.dumps(listing), "")
     pairs = ev.read_pair_set("blocked_custom_pair")
-    check("pair set parsed in both element forms", ("192.168.10.31", "93.184.215.14") in pairs
-          and ("192.168.10.32", "93.184.215.14") in pairs)
+    check("pair set parsed in both element forms", ("192.168.1.31", "93.184.215.14") in pairs
+          and ("192.168.1.32", "93.184.215.14") in pairs)
     applied.clear()
-    ev.release_custom_pairs({1}, {1: {"192.168.10.31"}}, {})
+    ev.release_custom_pairs({1}, {1: {"192.168.1.31"}}, {})
     check("fast release deletes only the allowed device's valid pairs",
-          len(applied) == 1 and "192.168.10.31 . 93.184.215.14" in applied[0]
-          and "192.168.10.32" not in applied[0] and "not-an-ip" not in applied[0])
+          len(applied) == 1 and "192.168.1.31 . 93.184.215.14" in applied[0]
+          and "192.168.1.32" not in applied[0] and "not-an-ip" not in applied[0])
 
     print()
     print("ALL PASSED" if not fails else f"{fails} FAILED")

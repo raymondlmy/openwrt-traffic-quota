@@ -1,5 +1,17 @@
 # Installing
 
+**Quickest way:** on the router, as root:
+
+```sh
+wget -qO /tmp/install.sh https://raw.githubusercontent.com/raymondlmy/openwrt-traffic-quota/main/install.sh
+sh /tmp/install.sh
+```
+
+It checks the router, downloads the latest release, verifies the checksums and
+installs with `apk` (dependencies included). It does not set up storage or
+AdGuard Home: do steps 2 and 3 below first if you need them, then run it and
+continue at step 6. The rest of this page is the manual route.
+
 1. [Packages you need](#1-packages-you-need)
 2. [Storage: flash the SD card and expand the ext4 partition](#2-storage-flash-the-sd-card-and-expand-the-ext4-partition)
 3. [Optional: AdGuard Home (for per-site quotas)](#3-optional-adguard-home-for-per-site-quotas)
@@ -16,11 +28,11 @@ automatically when you install ours, except where marked *you install*.
 
 | Package | Needed for | Size (approx.) | Notes |
 |---|---|---|---|
-| `python3` | everything | 20 MB+ with its modules | collector, evaluator, reports |
+| `python3` | everything | ~16 MB with its modules | collector, evaluator, reports, Telegram bot |
 | `sqlite3-cli` | everything | ~1 MB | install script and alert jobs |
 | `nftables-json` | everything | small | collector reads counters as JSON |
 | `luci-base`, `rpcd` | LuCI pages | — | already present on images with LuCI |
-| `curl`, `ca-bundle` | Telegram reports | ~1 MB | |
+| `curl`, `ca-bundle` | Telegram reports and commands | ~1 MB | |
 | `adguardhome` | per-site quotas only | ~32 MB | *you install*, see step 3 |
 
 **Check the router first:**
@@ -165,6 +177,9 @@ apk add adguardhome
 
 ## 4. Build the packages
 
+Skip this if you use `install.sh` or download the `.apk` files from the
+[latest release](https://github.com/raymondlmy/openwrt-traffic-quota/releases/latest).
+
 The packages contain no compiled code. You only need the host tools from an
 OpenWrt **25.12 SDK**, for any target (about 250 MB download):
 
@@ -178,7 +193,7 @@ grep " \*$F\$" sha256sums | sha256sum -c -          # must print OK
 tar --zstd -xf "$F" "${F%.tar.zst}/staging_dir/host"
 
 SDK="$PWD/${F%.tar.zst}" scripts/build-managed-apks.sh
-# -> dist/apk/0.6.0/: r3s-accounting, luci-app-r3s, r3s-accounting-telegram, SHA256SUMS
+# -> dist/apk/0.6.1/: r3s-accounting, luci-app-r3s, r3s-accounting-telegram, SHA256SUMS
 ```
 
 The `packages/*/Makefile`s also work as an OpenWrt package feed. That path is
@@ -190,10 +205,10 @@ Copy the packages to the router and install. Leave out `r3s-accounting-telegram`
 if you don't want Telegram, or `luci-app-r3s` if you don't use LuCI:
 
 ```sh
-scp -O dist/apk/0.6.0/*.apk dist/apk/0.6.0/SHA256SUMS root@192.168.1.1:/tmp/
+scp -O dist/apk/0.6.1/*.apk dist/apk/0.6.1/SHA256SUMS root@192.168.1.1:/tmp/
 ssh root@192.168.1.1
 cd /tmp && sha256sum -c SHA256SUMS
-apk add --allow-untrusted r3s-accounting-0.6.0-r1.apk luci-app-r3s-0.6.0-r1.apk r3s-accounting-telegram-0.6.0-r1.apk
+apk add --allow-untrusted r3s-accounting-0.6.1-r1.apk luci-app-r3s-0.6.1-r1.apk r3s-accounting-telegram-0.6.1-r1.apk
 ```
 
 The install:
@@ -266,12 +281,18 @@ uci set r3s-accounting.main.data_dir='/mnt/data/r3s-accounting'; uci commit r3s-
 
 ## Upgrading
 
-`apk add --allow-untrusted <new apk>` keeps:
+Run `sh /tmp/install.sh` again (it installs the latest release), or
+`apk add --allow-untrusted <new apk>`. Either keeps:
 
 - the database;
 - `/etc/config/r3s-accounting`;
 - the Telegram secrets;
-- the device registry. A pre-upgrade copy is restored if the upgrade removes it.
+- the device registry. A pre-upgrade copy is restored if the upgrade removes it;
+- per-device overrides and whether Telegram commands are on (the bot restarts
+  on the new version).
+
+The upgrade restarts the firewall, so blocks lift for a few seconds until the
+evaluator re-applies them.
 
 ## Removing
 

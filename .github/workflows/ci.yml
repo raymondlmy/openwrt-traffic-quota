@@ -17,7 +17,7 @@ jobs:
       - name: Shell scripts (shellcheck, errors only)
         run: |
           shellcheck --version
-          shellcheck -S error -s sh scripts/*.sh config/*.init packages/*/*.sh
+          shellcheck -S error -s sh install.sh scripts/*.sh config/*.init packages/*/*.sh
           shellcheck -S error -s bash tests/*.sh
       - uses: actions/setup-python@v7
         with:

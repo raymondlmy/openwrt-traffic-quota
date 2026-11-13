@@ -1,6 +1,6 @@
 #!/bin/sh
 # SPDX-License-Identifier: GPL-2.0-only
-# Build the two noarch APKs with only the OpenWrt SDK's host apk + fakeroot
+# Build the three noarch APKs with only the OpenWrt SDK's host apk + fakeroot
 # (no full SDK build). Any 25.12.x SDK works: the packages contain no binaries.
 #
 #   SDK=/path/to/openwrt-sdk-25.12.x-... scripts/build-managed-apks.sh
@@ -56,12 +56,14 @@ install -m 0644 "$REPO/config/luci/view/r3s-policy.js" "$L/www/luci-static/resou
 install -m 0644 "$REPO/config/luci/view/r3s-telegram.js" "$L/www/luci-static/resources/view/"
 
 T="$WORK/telegram"
-install -d -m 0755 "$T/usr/bin"
+install -d -m 0755 "$T/usr/bin" "$T/etc/init.d"
 for job in daily-report daily-health-report health-alerts quota-alerts; do
     install -m 0755 "$REPO/scripts/send-telegram-$job.sh" "$T/usr/bin/r3s-telegram-$job"
 done
 install -m 0755 "$REPO/scripts/telegram-setup.py" "$T/usr/bin/r3s-telegram-setup"
 install -m 0755 "$REPO/scripts/telegram-status.sh" "$T/usr/bin/r3s-telegram-status"
+install -m 0755 "$REPO/scripts/telegram-bot.py" "$T/usr/bin/r3s-telegram-bot"
+install -m 0755 "$REPO/config/r3s-telegram-bot.init" "$T/etc/init.d/r3s-telegram-bot"
 install -m 0644 "$REPO/config/luci/acl.d/luci-app-r3s-policy.json" "$L/usr/share/rpcd/acl.d/"
 
 "$FAKEROOT" "$APK" mkpkg --info "name:r3s-accounting" --info "version:$ACC_VER" \
@@ -82,10 +84,12 @@ install -m 0644 "$REPO/config/luci/acl.d/luci-app-r3s-policy.json" "$L/usr/share
   --files "$L" --output "$OUT/luci-app-r3s-$LUCI_VER.apk"
 
 "$FAKEROOT" "$APK" mkpkg --info "name:r3s-accounting-telegram" --info "version:$TG_VER" \
-  --info 'description:Telegram daily reports, quota alerts and router-health alerts for r3s-accounting.' \
+  --info 'description:Telegram reports, quota/health alerts and block/extend commands for r3s-accounting.' \
   --info 'arch:noarch' --info 'license:GPL-2.0-only' --info 'origin:openwrt-traffic-quota/r3s-accounting-telegram' \
   --info 'maintainer:Graype' --info "url:$URL" \
   --info 'depends:libc ca-bundle curl r3s-accounting' --info 'provides:r3s-accounting-telegram-any' \
+  --script "post-install:$REPO/packages/r3s-accounting-telegram/postinst.sh" \
+  --script "post-upgrade:$REPO/packages/r3s-accounting-telegram/postinst.sh" \
   --files "$T" --output "$OUT/r3s-accounting-telegram-$TG_VER.apk"
 
 (cd "$OUT" && sha256sum "r3s-accounting-$ACC_VER.apk" "luci-app-r3s-$LUCI_VER.apk" \

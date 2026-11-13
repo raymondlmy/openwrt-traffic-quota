@@ -51,7 +51,7 @@ def main() -> None:
     lines = []
     for i, t in enumerate(range(now - 12 * 3600, now + 60, 2)):
         host = "www.example.com" if i % 50 == 0 else f"other{i % 7}.test"
-        lines.append(json.dumps({"T": stamp(t), "QH": host, "IP": f"192.168.10.{31 + i % 3}",
+        lines.append(json.dumps({"T": stamp(t), "QH": host, "IP": f"192.168.1.{31 + i % 3}",
                                  "Answer": answer(f"93.184.{i % 200}.{i % 250}")}))
         if i % 997 == 0:
             lines.append("{not json")
@@ -63,7 +63,7 @@ def main() -> None:
         if not seek:
             ev.seek_log_time = lambda handle, start: 0
         try:
-            return ev.load_recent_dns_evidence(str(log), now, rows, {"192.168.10.31": 1})
+            return ev.load_recent_dns_evidence(str(log), now, rows, {"192.168.1.31": 1})
         finally:
             ev.seek_log_time = original
 

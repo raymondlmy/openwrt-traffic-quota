@@ -1,14 +1,11 @@
 # luci-app-r3s changelog
 
-## 0.6.0-3 - 2026-11-13
+## 0.6.1-1 - 2026-11-13
 
 - Policies by Device shows a device's override (from Telegram, LuCI or the
   CLI) with its end time, and a Clear button.
 - Telegram Reports: section 4, Commands, switches the Telegram command
   service on or off.
-
-## 0.6.0-2 - 2026-11-13
-
 - **Policies by Device** table under Policy Management: one row per device
   listing its schedules and quotas (disabled ones marked) and whether it is
   blocked right now, and by which policy. Previously a device's schedule was

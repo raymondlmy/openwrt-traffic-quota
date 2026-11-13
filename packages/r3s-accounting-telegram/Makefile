@@ -1,8 +1,8 @@
 include $(TOPDIR)/rules.mk
 
 PKG_NAME:=r3s-accounting-telegram
-PKG_VERSION:=0.6.0
-PKG_RELEASE:=2
+PKG_VERSION:=0.6.1
+PKG_RELEASE:=1
 PKG_MAINTAINER:=Graype
 PKG_LICENSE:=GPL-2.0-only
 PKG_LICENSE_FILES:=LICENSE
@@ -50,6 +50,17 @@ define Package/r3s-accounting-telegram/install
 	$(INSTALL_BIN) $(PKG_BUILD_DIR)/scripts/telegram-bot.py $(1)/usr/bin/r3s-telegram-bot
 	$(INSTALL_DIR) $(1)/etc/init.d
 	$(INSTALL_BIN) $(PKG_BUILD_DIR)/config/r3s-telegram-bot.init $(1)/etc/init.d/r3s-telegram-bot
+endef
+
+define Package/r3s-accounting-telegram/postinst
+#!/bin/sh
+[ "$${IPKG_NO_SCRIPT}" = "1" ] && exit 0
+[ -n "$${IPKG_INSTROOT}" ] && exit 0
+if [ "$$(uci -q get r3s-accounting.main.telegram_bot)" = "1" ]; then
+    /etc/init.d/r3s-telegram-bot enable
+    /etc/init.d/r3s-telegram-bot restart
+fi
+exit 0
 endef
 
 $(eval $(call BuildPackage,r3s-accounting-telegram))

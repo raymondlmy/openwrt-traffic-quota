@@ -1,8 +1,8 @@
 include $(TOPDIR)/rules.mk
 
 PKG_NAME:=r3s-accounting
-PKG_VERSION:=0.6.0
-PKG_RELEASE:=2
+PKG_VERSION:=0.6.1
+PKG_RELEASE:=1
 PKG_MAINTAINER:=Graype
 PKG_LICENSE:=GPL-2.0-only
 PKG_LICENSE_FILES:=LICENSE
@@ -102,7 +102,7 @@ warn() { echo "r3s-accounting: WARNING: $$*"; logger -t r3s-accounting "WARNING:
 free_kb="$$(df -k "$${DATA_DIR}" 2>/dev/null | awk 'NR==2 {print $$4}')"
 [ -n "$${free_kb}" ] && [ "$${free_kb}" -lt 51200 ] && \
     warn "only $${free_kb} KB free for $${DATA_DIR}; the database typically grows to 50-150 MB"
-fstype="$$(awk -v d="$${DATA_DIR}" 'index(d"/", $$2"/")==1 && length($$2)>=n {n=length($$2); t=$$3} END {print t}' /proc/mounts)"
+fstype="$$(awk -v d="$${DATA_DIR}" '{m=$$2; if (m=="/") m=""} index(d"/", m"/")==1 && length(m)>=n {n=length(m); t=$$3} END {print t}' /proc/mounts)"
 case "$${fstype}" in
     overlay|jffs2|ubifs|squashfs)
         warn "$${DATA_DIR} is on $${fstype} (router flash); the database is written every minute. Set data_dir to SD/eMMC/USB storage." ;;

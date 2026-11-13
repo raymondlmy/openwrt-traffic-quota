@@ -1,6 +1,6 @@
 # r3s-accounting changelog
 
-## 0.6.0-2 - 2026-11-13
+## 0.6.1-1 - 2026-11-13
 
 - Per-device overrides: `r3s-policy override --device ID --action allow|block
   [--minutes N]`, `clear-override` and `overrides`. An override decides for
@@ -24,6 +24,9 @@
   points once per run instead of once per usage row. Schedules and quotas
   react within about 75 s instead of about 2 minutes. Verified on a frozen copy
   of the live log: evidence identical to the previous version.
+- Install warning fixed: the "database on router flash" check never matched
+  the root mount `/`, so it stayed silent on routers whose `/` is the flash
+  overlay, the case it exists for.
 
 ## 0.6.0-1 - 2026-10-28
 
