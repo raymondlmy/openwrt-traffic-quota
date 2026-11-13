@@ -14,6 +14,24 @@ for OpenWrt routers, over **IPv4 and IPv6**.
   blocked until midnight.
 - **Telegram reports** (optional): a daily traffic report, quota alerts and
   router-health alerts, set up from LuCI. See [TELEGRAM.md](TELEGRAM.md).
+- **Telegram commands** (optional, off by default): from your phone, block a
+  device, give it extra time past its schedule or quota, or see what is
+  blocked and why:
+
+  ```
+  /status
+  /block living room tv 30m   /block tablet          (until /unblock)
+  /extend laptop 30m          /extend laptop 23:00   (ends by itself)
+  /unblock laptop
+  ```
+
+  The router polls Telegram over outbound HTTPS, so **no port is opened**.
+  Only your private chat is obeyed. An override affects one device across
+  all its policies and shows on the LuCI page with a Clear button. Details in
+  [TELEGRAM.md](TELEGRAM.md#commands-block-unblock-and-extra-time).
+- **Per-device overrides** from the command line too:
+  `r3s-policy override --device ID --action block|allow [--minutes N]`,
+  `r3s-policy clear-override --device ID`, `r3s-policy overrides`.
 - **LuCI pages** (Services → Traffic Quotas, Services → Telegram Reports) to
   register devices, approve new MAC addresses, edit policies and set up
   Telegram. Read-only LuCI users can view but not change anything.
@@ -22,7 +40,7 @@ for OpenWrt routers, over **IPv4 and IPv6**.
 |---|---|
 | **`r3s-accounting`** | collector, reports (`bw-rpt`), policy evaluator, `r3s-policy` CLI |
 | **`luci-app-r3s`** | the two LuCI pages |
-| **`r3s-accounting-telegram`** | Telegram reports and alerts, `r3s-telegram-setup` (optional) |
+| **`r3s-accounting-telegram`** | Telegram reports and alerts, `r3s-telegram-setup`, the `r3s-telegram-bot` command service (optional) |
 
 The `r3s` names are historical: the project started on a NanoPi R3S. Nothing
 in it is specific to that board.
@@ -124,7 +142,13 @@ ship or overwrite it. An example is in
 ## Security notes
 
 - **Nothing listens on the network.** The LuCI page uses LuCI's normal
-  authentication.
+  authentication. The Telegram command service only makes outbound HTTPS
+  requests (long polling); it obeys only the configured chat, and only when
+  that is a private chat with the bot, and every change goes through
+  `r3s-policy`'s validation and is logged (`device_override_log`).
+- **Blocking your own phone** blocks its Telegram over home Wi-Fi too. Switch
+  the phone to mobile data to send `/unblock`; mobile data does not pass
+  through the router.
 - **Read-only LuCI users** only get `/usr/bin/r3s-policy-ro` (viewing
   subcommands, no options) and `/usr/bin/r3s-telegram-status`.
 - **The Telegram token** is stored root-only (mode 600) and never shown or
@@ -146,6 +170,9 @@ tests/ipv6_netns_e2e.sh          # real traffic through the rules, collector and
 tests/test_render_nft.sh         # interface-name rendering and validation
 tests/test_registry_upgrade.sh   # install / upgrade registry handling
 python3 tests/test_telegram_setup.py   # Telegram setup against a fake curl
+python3 tests/test_telegram_bot.py     # bot commands, authorisation, expiry notices
+python3 tests/test_device_overrides.py # per-device overrides: CLI and evaluator
+python3 tests/test_dns_evidence.py     # query-log seek matches a full scan
 python3 tests/test_ipv6_units.py
 python3 tests/collector_undercount_sim.py
 ```

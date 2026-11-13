@@ -99,6 +99,15 @@ How it works and what keeps it safe:
 `/unblock` only removes your override. If a schedule is active the device stays
 blocked, and the reply says so; use `/extend` to let it online anyway.
 
+Type `/` in the chat for the command menu, or send `/help`. Names may contain
+spaces and need no quotes (`/block living room tv 30m`); the start of a name is
+enough, and an ambiguous one gets "Which one?".
+
+**Blocking the phone you message from** blocks its Telegram over home Wi-Fi
+too. To undo it early, switch that phone to mobile data and send `/unblock`:
+mobile data does not pass through the router. Otherwise a timed block ends by
+itself and the bot tells you.
+
 ## Troubleshooting
 
 ```sh

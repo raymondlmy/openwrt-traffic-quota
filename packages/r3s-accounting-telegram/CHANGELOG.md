@@ -6,7 +6,7 @@
   `/block NAME [30m|2h|23:00]`, `/extend NAME 30m|2h|23:00`, `/unblock NAME`,
   `/devices`. Long polling over outbound HTTPS only; no port or webhook.
   Commands appear in Telegram's "/" menu. Names may contain spaces and need
-  no quotes (`/block Nest Mini 30m`); a unique start of a name is enough.
+  no quotes (`/block living room tv 30m`); a unique start of a name is enough.
   Obeyed only from the configured chat when it is a private chat with the
   bot; other senders are ignored and reported (at most 5 reports an hour).
   Commands queued for more than 2 minutes (bot or router down) are skipped,

@@ -128,7 +128,7 @@ def main() -> None:
     check("2h -> 120", bot.parse_duration("2h") == 120)
     check("45 -> 45", bot.parse_duration("45") == 45)
     check("not a duration -> None", bot.parse_duration("tv") is None)
-    check("names with spaces", bot.split_name_duration("Nest Hub 30m") == ("Nest Hub", 30))
+    check("names with spaces", bot.split_name_duration("living room tv 30m") == ("living room tv", 30))
 
     # ---- expiry notices ----
     say("/extend laptop-1 30m")

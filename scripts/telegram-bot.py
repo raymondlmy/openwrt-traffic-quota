@@ -44,7 +44,7 @@ HELP = """Commands:
 /unblock NAME - remove your block/extend; normal policies apply again
 /devices - device names
 
-NAME can be the start of a name, e.g. /extend slap 30m"""
+NAME can be the start of a name, e.g. /extend lap 30m"""
 
 
 # Shown in Telegram's "/" menu (setMyCommands), so the commands need no memorising.
