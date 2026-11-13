@@ -1,5 +1,11 @@
 # r3s-accounting-telegram changelog
 
+## Unreleased
+
+- Bot polls with a 50 s long-poll timeout (was 25 s): half the requests to
+  Telegram (about 1,700 a day instead of 3,500). Commands still arrive at
+  once; an "override ended" notice can take up to ~50 s.
+
 ## 0.6.1-1 - 2026-11-13
 
 - Telegram commands (`r3s-telegram-bot`, off by default): `/status`,
