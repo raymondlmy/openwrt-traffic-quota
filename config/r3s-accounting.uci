@@ -23,3 +23,7 @@ config accounting 'main'
     # auto-detect /opt/adguardhome or /var/lib/adguardhome. Without AdGuard,
     # schedules and whole-device blocks work but per-site quotas never charge.
     option adguard_querylog ''
+    # Telegram commands (/block /unblock /extend /status) from the chat in
+    # /etc/r3s-accounting/secrets. 1 = on. Set with r3s-telegram-setup
+    # schedule --commands on|off or Services > Telegram Reports.
+    option telegram_bot '0'

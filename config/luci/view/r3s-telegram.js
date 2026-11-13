@@ -102,6 +102,14 @@ return view.extend({
         }, this)).catch(function(err) { notify(err.message, 'danger'); });
     },
 
+    saveCommands: function() {
+        var on = document.querySelector('#r3s-tg-commands').checked;
+        return run(SETUP, ['schedule', '--commands', on ? 'on' : 'off']).then(L.bind(function() {
+            notify(on ? _('Telegram commands are on. Send /help to your bot.') : _('Telegram commands are off.'));
+            return this.refresh();
+        }, this)).catch(function(err) { notify(err.message, 'danger'); });
+    },
+
     refresh: function() {
         return this.load().then(L.bind(function(status) {
             dom.content(document.querySelector('#r3s-tg-root'), this.renderBody(status));
@@ -164,6 +172,19 @@ return view.extend({
                                  'value': s.daily_time || '06:00', 'placeholder': 'HH:MM' }),
                     _('Router local time.')),
                 E('button', { 'class': 'cbi-button cbi-button-save', 'click': ui.createHandlerFn(this, 'saveSchedule') }, _('Save reports'))
+            ]),
+            E('div', { 'class': 'cbi-section' }, [
+                E('h3', {}, _('4. Commands')),
+                E('p', { 'class': 'cbi-section-descr' },
+                    _('Control devices from the chat above: /status, /block, /unblock, /extend (extra time). ' +
+                      'Only that chat is obeyed, and only if it is a private chat with the bot. ' +
+                      'The router asks Telegram for new messages; no port is opened.')),
+                E('div', {}, E('label', {}, [
+                    E('input', { 'type': 'checkbox', 'id': 'r3s-tg-commands', 'checked': s.commands ? '' : null }),
+                    ' ', _('Accept commands from my chat')
+                ])),
+                E('button', { 'class': 'cbi-button cbi-button-save', 'click': ui.createHandlerFn(this, 'saveCommands'),
+                              'disabled': (s.token_set && s.chat_id) ? null : '' }, _('Save commands'))
             ])
         ]);
     },

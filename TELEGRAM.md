@@ -61,6 +61,44 @@ r3s-telegram-setup schedule --daily on --daily-time 07:30 \
 The schedule is stored in root's crontab as lines ending in
 `# r3s-telegram:<job>`. The tool only edits its own lines.
 
+## Commands: block, unblock and extra time
+
+Optional and off by default. Turn it on in **Services → Telegram Reports →
+4. Commands**, or with `r3s-telegram-setup schedule --commands on`.
+
+```
+/status                     what is blocked right now, and why
+/block NAME [30m|2h|23:00]  block a device (until /unblock, or for a while)
+/extend NAME 30m|2h|23:00   let a device online despite its schedules and quotas
+/unblock NAME               remove your block or extra time
+/devices                    device names
+```
+
+`NAME` can be the start of a name (`/extend lap 30m`). A time like `23:00`
+means "until 23:00" (tomorrow if that time has passed).
+
+How it works and what keeps it safe:
+
+- **No open port.** The router asks Telegram for new messages (long polling,
+  outbound HTTPS). Nothing on the internet connects to the router; the
+  firewall is unchanged.
+- **Only your chat.** Commands are obeyed only from the chat ID in
+  `/etc/r3s-accounting/secrets`, and only if it is a private chat with the
+  bot (in a group, every member could send commands). Anyone else is
+  ignored, and you get a notice (at most 5 an hour).
+- **Per device.** An override affects only the device you name, across all of
+  its policies. Extra time always ends by itself (12 hours at most); usage is
+  still counted during it, so a used-up quota blocks again afterwards. You get
+  a message when it ends.
+- **Nothing replayed.** A command that waited more than 2 minutes (bot or
+  router down) is skipped, and you are told.
+- **Visible.** Overrides show in the policy page (**Policies by Device**, with a
+  Clear button) and in `r3s-policy overrides`; every change is logged
+  (`device_override_log`, and `logread -e r3s-telegram-bot`).
+
+`/unblock` only removes your override. If a schedule is active the device stays
+blocked, and the reply says so; use `/extend` to let it online anyway.
+
 ## Troubleshooting
 
 ```sh

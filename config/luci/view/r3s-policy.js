@@ -129,13 +129,23 @@ function devicePolicySummary(devices, policies, decisions) {
             else if (policy.type === 'service_quota')
                 quotas.push('%s: %s/day%s'.format(policy.name, mb(policy.quota), off));
         });
+        // A per-device override (Telegram /block, /extend, or r3s-policy override)
+        // decides on its own; policy rows it flipped carry 'device override' in the reason.
+        var override = null;
+        decisions.forEach(function(row) {
+            if (row.deviceId === device.id && row.policy === 'device override')
+                override = row;
+        });
         var blockedBy = decisions.filter(function(row) {
-            return row.deviceId === device.id && row.decision === 'block';
+            return row.deviceId === device.id && row.decision === 'block' &&
+                row.policy !== 'device override' && row.reason.indexOf('device override') === -1;
         }).map(function(row) {
             return row.policy;
         });
         var status = '-';
-        if (blockedBy.length)
+        if (override)
+            status = 'Override: %s'.format(override.reason);
+        else if (blockedBy.length)
             status = 'Blocked (%s)'.format(blockedBy.join(', '));
         else if (schedules.length || quotas.length)
             status = 'Allowed';
@@ -145,7 +155,8 @@ function devicePolicySummary(devices, policies, decisions) {
             group: device.group,
             schedules: schedules,
             quotas: quotas,
-            status: status
+            status: status,
+            override: !!override
         };
     });
 }
@@ -414,6 +425,20 @@ return view.extend({
         });
     },
 
+    clearOverride: function(deviceId, name) {
+        if (!confirm(_('Clear the override on "%s"? Its normal schedules and quotas apply again.').format(name)))
+            return Promise.resolve();
+        return command(['clear-override', '--device', deviceId, '--source', 'luci']).then(function() {
+            // Fast pass so the change shows within seconds; the full run follows.
+            return L.resolveDefault(execCommand('/usr/bin/r3s-policy-evaluator', ['--overrides-only']), null);
+        }).then(L.bind(function() {
+            ui.addNotification(null, E('p', {}, _('Override cleared on %s.').format(name)), 'info');
+            return this.refresh();
+        }, this)).catch(function(err) {
+            ui.addNotification(null, E('p', {}, err.message), 'danger');
+        });
+    },
+
     resetQuota: function(policyId, name) {
         if (!confirm(_('Reset today\'s usage for "%s"? This starts a fresh measurement for every attached device; historical usage is retained.').format(name)))
             return Promise.resolve();
@@ -470,15 +495,18 @@ return view.extend({
             ]);
         }, this) : [E('tr', { 'class': 'tr' }, E('td', { 'class': 'td', 'colspan': 9 }, _('No policies configured')))];
         var deviceSummary = devicePolicySummary(devices, policies, decisions);
-        var devicePolicyTableRows = deviceSummary.length ? deviceSummary.map(function(row) {
+        var devicePolicyTableRows = deviceSummary.length ? deviceSummary.map(L.bind(function(row) {
             return E('tr', { 'class': 'tr' }, [
                 E('td', { 'class': 'td' }, '%s %s'.format(row.id, row.name)),
                 E('td', { 'class': 'td' }, row.group),
                 E('td', { 'class': 'td' }, lineList(row.schedules)),
                 E('td', { 'class': 'td' }, lineList(row.quotas)),
-                E('td', { 'class': 'td' }, row.status)
+                E('td', { 'class': 'td' }, row.override ? [row.status, ' ', E('button', {
+                    'class': 'cbi-button cbi-button-negative',
+                    'click': ui.createHandlerFn(this, 'clearOverride', row.id, row.name)
+                }, _('Clear'))] : row.status)
             ]);
-        }) : [E('tr', { 'class': 'tr' }, E('td', { 'class': 'td', 'colspan': 5 }, _('No devices registered')))];
+        }, this)) : [E('tr', { 'class': 'tr' }, E('td', { 'class': 'td', 'colspan': 5 }, _('No devices registered')))];
         var decisionTableRows = decisions.length ? decisions.map(function(row) {
             return E('tr', { 'class': 'tr' }, [
                 E('td', { 'class': 'td' }, row.policy),

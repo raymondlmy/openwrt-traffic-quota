@@ -583,6 +583,8 @@ def decide_schedule_blocks(
     blocked_set: str = "blocked_internet_src",
     device_macs: dict[int, set[str]] | None = None,
     blocked_mac_set: str = "blocked_internet_mac6",
+    allowed_override: set[int] | None = None,
+    blocked_override: set[int] | None = None,
 ) -> None:
     day, minute = local_day_and_minute(now)
     device_macs = device_macs or {}
@@ -603,6 +605,9 @@ def decide_schedule_blocks(
             )
         )
     }
+    # Per-device overrides win over every policy: allow lifts, block adds.
+    blocked_devices -= allowed_override or set()
+    blocked_devices |= blocked_override or set()
     blocked_ips = sorted(
         {ip for device_id in blocked_devices
          for ip in by_family(device_ips.get(device_id, set()), 4)},
@@ -657,14 +662,20 @@ def decide_custom_blocks(
     client_dns_destinations: dict[tuple[int, str], set[str]],
     now: int,
     device_macs: dict[int, set[str]] | None = None,
+    allowed_override: set[int] | None = None,
 ) -> None:
     """Block only the device/destination pairs owned by an active custom policy."""
     today = local_period_start(now)
     device_macs = device_macs or {}
+    allowed_override = allowed_override or set()
     blocked_pairs: set[tuple[str, str]] = set()
     blocked_pairs6: set[tuple[str, str]] = set()
 
     def block_policy_device(policy_id: int, device_id: int) -> None:
+        # An 'allow' override lifts the block; usage is still counted and the
+        # stored quota state is unchanged, so the block returns on expiry.
+        if device_id in allowed_override:
+            return
         sources = device_ips.get(device_id, set())
         destinations = set(policy_destinations.get(policy_id, set()))
         for source in sources:
@@ -730,6 +741,106 @@ def decide_custom_blocks(
     apply_nft("\n".join(commands) + "\n")
 
 
+def load_overrides(con: sqlite3.Connection, now: int) -> tuple[set[int], set[int]]:
+    """Return (allowed, blocked) device ids from active per-device overrides.
+
+    Expired overrides are deleted and logged as 'expire' (the Telegram bot
+    reports each one once). A database without migration 013 has none.
+    """
+    try:
+        expired = con.execute(
+            """SELECT o.device_id,o.expires_at,o.source,COALESCE(d.name,'device '||o.device_id) AS name
+               FROM device_overrides o LEFT JOIN devices d ON d.device_id=o.device_id
+               WHERE o.expires_at IS NOT NULL AND o.expires_at<=?""",
+            (now,),
+        ).fetchall()
+        for row in expired:
+            con.execute(
+                """INSERT INTO device_override_log
+                   (event_time,device_id,device_name,event,expires_at,source,note)
+                   VALUES(?,?,?,'expire',?,?,NULL)""",
+                (now, int(row["device_id"]), str(row["name"]), row["expires_at"], str(row["source"])),
+            )
+            con.execute(
+                "DELETE FROM device_overrides WHERE device_id=? AND expires_at=?",
+                (int(row["device_id"]), row["expires_at"]),
+            )
+        rows = con.execute(
+            """SELECT o.device_id,o.action FROM device_overrides o
+               JOIN devices d ON d.device_id=o.device_id WHERE d.enabled=1"""
+        ).fetchall()
+    except sqlite3.OperationalError:
+        return set(), set()
+    allowed = {int(r["device_id"]) for r in rows if r["action"] == "allow"}
+    blocked = {int(r["device_id"]) for r in rows if r["action"] == "block"}
+    return allowed, blocked
+
+
+def device_addresses(
+    con: sqlite3.Connection, device_ids: set[int]
+) -> tuple[dict[int, set[str]], dict[int, set[str]]]:
+    """Current IPs (DHCP leases + neighbour table) and canonical MACs per device."""
+    lookup = mac_device_lookup(con, device_ids)
+    ips = merge_device_ips(load_dhcp_ips(lookup), load_neigh_ips(lookup))
+    macs: dict[int, set[str]] = {}
+    for mac, device_id in lookup.items():
+        # MACs are written into nft commands: accept only canonical form.
+        if MAC_RE.fullmatch(mac):
+            macs.setdefault(device_id, set()).add(mac)
+    return ips, macs
+
+
+def read_pair_set(setname: str) -> list[tuple[str, str]]:
+    """Elements of a concatenated 'a . b' set as (a, b) tuples."""
+    raw = run_command([NFT, "-j", "list", "set", "inet", NFT_TABLE, setname]).stdout
+    try:
+        document: Any = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        fail(f"invalid nft JSON for {setname}: {exc}")
+    pairs: list[tuple[str, str]] = []
+    for item in document.get("nftables", []) if isinstance(document, dict) else []:
+        set_object = item.get("set") if isinstance(item, dict) else None
+        if not isinstance(set_object, dict):
+            continue
+        for element in set_object.get("elem", []) or []:
+            # Plain {"concat": [...]}, or {"elem": {"val": {"concat": [...]}, "timeout": ...}}.
+            if isinstance(element, dict) and isinstance(element.get("elem"), dict):
+                element = element["elem"].get("val")
+            parts = element.get("concat") if isinstance(element, dict) else None
+            if isinstance(parts, list) and len(parts) == 2:
+                pairs.append((str(parts[0]), str(parts[1])))
+    return pairs
+
+
+def release_custom_pairs(
+    allowed: set[int], device_ips: dict[int, set[str]], device_macs: dict[int, set[str]]
+) -> None:
+    """Fast path: drop site-block pairs whose source is an allowed device."""
+    sources4 = {ip for d in allowed for ip in by_family(device_ips.get(d, set()), 4)}
+    sources6 = {mac for d in allowed for mac in device_macs.get(d, set())}
+    commands: list[str] = []
+    for setname, sources in (("blocked_custom_pair", sources4), ("blocked_custom_pair6", sources6)):
+        if not sources:
+            continue
+        for source, destination in read_pair_set(setname):
+            # Values come from nft and our own canonical sets; re-validate
+            # before writing them back into an nft command.
+            if source in sources and _is_ip(destination):
+                commands.append(
+                    f"delete element inet {NFT_TABLE} {setname} {{ {source} . {destination} }}"
+                )
+    if commands:
+        apply_nft("\n".join(commands) + "\n")
+
+
+def _is_ip(value: str) -> bool:
+    try:
+        ipaddress.ip_address(value)
+    except ValueError:
+        return False
+    return True
+
+
 def verify_nft() -> None:
     run_command([NFT, "list", "table", "inet", NFT_TABLE])
 
@@ -741,9 +852,26 @@ def main() -> int:
     )
     parser.add_argument("--db", default=DB_DEFAULT)
     parser.add_argument("--adguard-querylog", default=ADGUARD_QUERYLOG)
+    parser.add_argument(
+        "--overrides-only",
+        action="store_true",
+        help="fast pass after an override change: rebuild whole-device blocks and "
+             "release site blocks of allowed devices; the next full run does the rest",
+    )
     args = parser.parse_args()
     now = int(time.time())
     verify_nft()
+    if args.overrides_only:
+        with open_database(args.db) as con:
+            allowed, blocked = load_overrides(con, now)
+            schedule_rows = active_schedule_rows(con)
+            ids = {int(row["device_id"]) for row in schedule_rows} | allowed | blocked
+            ips, macs = device_addresses(con, ids)
+            decide_schedule_blocks(schedule_rows, ips, now, device_macs=macs,
+                                   allowed_override=allowed, blocked_override=blocked)
+            release_custom_pairs(allowed, ips, macs)
+            con.commit()
+        return 0
     with open_database(args.db) as con:
         custom_quota_rows = active_custom_quota_rows(con)
         custom_schedule_rows = active_custom_schedule_rows(con)
@@ -783,6 +911,14 @@ def main() -> int:
         custom_rx = read_nft_set("custom_quota_dst")
         sync_counter_set("custom_quota_src", set(), set(custom_tx))
         sync_counter_set("custom_quota_dst", set(), set(custom_rx))
+        # Read overrides only now, after the slow sampling above, so a change
+        # made (and fast-applied) during this run is not undone by stale state.
+        allowed, blocked = load_overrides(con, now)
+        missing = blocked - device_ids  # devices with no policy: not looked up yet
+        if missing:
+            extra_ips, extra_macs = device_addresses(con, missing)
+            device_ips.update(extra_ips)
+            device_macs.update(extra_macs)
         decide_custom_blocks(
             con,
             custom_quota_rows,
@@ -792,11 +928,13 @@ def main() -> int:
             custom_dns,
             now,
             device_macs,
+            allowed_override=allowed,
         )
         # Only quota rows are passed here: schedules never produce Telegram
         # alerts, even when their block is currently active.
         queue_quota_alerts(con, custom_quota_rows, now)
-        decide_schedule_blocks(schedule_rows, device_ips, now, device_macs=device_macs)
+        decide_schedule_blocks(schedule_rows, device_ips, now, device_macs=device_macs,
+                               allowed_override=allowed, blocked_override=blocked)
         con.commit()
     return 0
 

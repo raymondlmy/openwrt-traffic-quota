@@ -25,7 +25,7 @@ fi
 if ! sqlite3 "${DB}" 'PRAGMA table_info(policy_rules);' | grep -q '|domains|'; then
     sqlite3 "${DB}" < /usr/share/r3s-accounting/migrations/004-custom-domain-policies.sql || exit 1
 fi
-for migration in 001-ip-mac-history.sql 002-service-policy.sql 003-policy-counter-baselines.sql 005-router-health.sql 006-router-health-alerts.sql 007-destination-accounting.sql 008-custom-policy-destinations.sql 009-drop-custom-policy-destinations.sql 010-policy-quota-alerts.sql 011-destination-quarter-hour-accounting.sql 012-policy-usage-evidence.sql; do
+for migration in 001-ip-mac-history.sql 002-service-policy.sql 003-policy-counter-baselines.sql 005-router-health.sql 006-router-health-alerts.sql 007-destination-accounting.sql 008-custom-policy-destinations.sql 009-drop-custom-policy-destinations.sql 010-policy-quota-alerts.sql 011-destination-quarter-hour-accounting.sql 012-policy-usage-evidence.sql 013-device-overrides.sql; do
     sqlite3 "${DB}" < "/usr/share/r3s-accounting/migrations/${migration}" || exit 1
 done
 REG=/etc/r3s-accounting/devices.json

@@ -2,7 +2,7 @@ include $(TOPDIR)/rules.mk
 
 PKG_NAME:=r3s-accounting-telegram
 PKG_VERSION:=0.6.0
-PKG_RELEASE:=1
+PKG_RELEASE:=2
 PKG_MAINTAINER:=Graype
 PKG_LICENSE:=GPL-2.0-only
 PKG_LICENSE_FILES:=LICENSE
@@ -16,6 +16,7 @@ REPO_ROOT:=$(realpath $(CURDIR)/../..)
 define Build/Prepare
 	mkdir -p $(PKG_BUILD_DIR)
 	$(CP) $(REPO_ROOT)/scripts $(PKG_BUILD_DIR)/
+	$(CP) $(REPO_ROOT)/config $(PKG_BUILD_DIR)/
 endef
 
 define Package/r3s-accounting-telegram
@@ -29,8 +30,9 @@ endef
 
 define Package/r3s-accounting-telegram/description
   Daily traffic and router-health reports, quota alerts and CPU/memory alerts
-  sent to a Telegram chat. Set up with r3s-telegram-setup or the LuCI page
-  Services > Telegram Reports.
+  sent to a Telegram chat, and optional Telegram commands to block, unblock or
+  give a device extra time (outbound polling only; no open port). Set up with
+  r3s-telegram-setup or the LuCI page Services > Telegram Reports.
 endef
 
 define Build/Compile
@@ -45,6 +47,9 @@ define Package/r3s-accounting-telegram/install
 	$(INSTALL_BIN) $(PKG_BUILD_DIR)/scripts/send-telegram-quota-alerts.sh $(1)/usr/bin/r3s-telegram-quota-alerts
 	$(INSTALL_BIN) $(PKG_BUILD_DIR)/scripts/telegram-setup.py $(1)/usr/bin/r3s-telegram-setup
 	$(INSTALL_BIN) $(PKG_BUILD_DIR)/scripts/telegram-status.sh $(1)/usr/bin/r3s-telegram-status
+	$(INSTALL_BIN) $(PKG_BUILD_DIR)/scripts/telegram-bot.py $(1)/usr/bin/r3s-telegram-bot
+	$(INSTALL_DIR) $(1)/etc/init.d
+	$(INSTALL_BIN) $(PKG_BUILD_DIR)/config/r3s-telegram-bot.init $(1)/etc/init.d/r3s-telegram-bot
 endef
 
 $(eval $(call BuildPackage,r3s-accounting-telegram))

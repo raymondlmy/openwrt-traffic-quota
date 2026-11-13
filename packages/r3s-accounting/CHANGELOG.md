@@ -1,5 +1,23 @@
 # r3s-accounting changelog
 
+## 0.6.0-2 - 2026-11-13
+
+- Per-device overrides: `r3s-policy override --device ID --action allow|block
+  [--minutes N]`, `clear-override` and `overrides`. An override decides for
+  that one device across all its policies (the per-policy `manual_override`
+  applies to every device in the policy). `allow` needs `--minutes`; usage is
+  still counted and blocks return when it expires. `block` covers a device
+  with no policy too. Every change and expiry is logged in
+  `device_override_log` (migration 013).
+- `r3s-policy-evaluator --overrides-only`: fast pass (about a second) that
+  rebuilds whole-device blocks and releases site blocks of allowed devices,
+  so a change applies without waiting for the full run. The full run reads
+  overrides just before applying, so a run already in progress cannot undo
+  a newer change.
+- `r3s-policy evaluate` lists `device override` rows first and marks policy
+  rows an override changed; `r3s-policy-ro overrides` for read-only users.
+- New option `telegram_bot` (default `0`) for the Telegram commands service.
+
 ## 0.6.0-1 - 2026-10-28
 
 First public release, from a private home-router project (last private

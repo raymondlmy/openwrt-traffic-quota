@@ -459,10 +459,111 @@ def reset_quota(con, args):
         raise
     print(f"Reset today's quota for policy {args.policy_id}: {policy['name']} ({len(devices)} device(s)); applies within 10 seconds")
 
+OVERRIDE_SOURCES = ('cli', 'luci', 'telegram')
+OVERRIDE_MAX_MINUTES = 7 * 24 * 60
+NOTE_RE = re.compile(r"[^\x00-\x1f\x7f]{0,80}")
+
+def active_overrides(con, now=None):
+    """device_id -> override row, ignoring expired rows (the evaluator deletes those).
+
+    Tolerates a database without the 013 migration so read-only views keep working.
+    """
+    now = int(time.time()) if now is None else now
+    try:
+        rows = con.execute("""SELECT o.device_id,d.name,o.action,o.expires_at,o.source,o.note,o.created_at
+            FROM device_overrides o JOIN devices d ON d.device_id=o.device_id
+            WHERE d.enabled=1 AND (o.expires_at IS NULL OR o.expires_at>?)
+            ORDER BY d.name""", (now,)).fetchall()
+    except sqlite3.OperationalError:
+        return {}
+    return {int(r['device_id']): r for r in rows}
+
+def until_text(expires_at, now=None):
+    if expires_at is None:
+        return 'until cleared'
+    now = int(time.time()) if now is None else now
+    when = datetime.fromtimestamp(int(expires_at))
+    if when.date() == datetime.fromtimestamp(now).date():
+        return 'until ' + when.strftime('%H:%M')
+    return 'until ' + when.strftime('%a %H:%M')
+
+def override_text(row, now=None):
+    verb = 'allowed' if row['action'] == 'allow' else 'blocked'
+    return f"{verb} {until_text(row['expires_at'], now)} ({row['source']})"
+
+def enabled_device(con, device_id):
+    row = con.execute("SELECT device_id,name FROM devices WHERE device_id=? AND enabled=1",
+                      (device_id,)).fetchone()
+    if row is None:
+        raise SystemExit(f"enabled device_id not found: {device_id}")
+    return row
+
+def override_args(args):
+    if args.source not in OVERRIDE_SOURCES:
+        raise SystemExit('--source must be one of ' + ', '.join(OVERRIDE_SOURCES))
+    note = (args.note or '').strip()
+    if not NOTE_RE.fullmatch(note):
+        raise SystemExit('--note must be at most 80 printable characters')
+    return note or None
+
+def set_override(con, args):
+    note = override_args(args)
+    if args.minutes is not None and not 1 <= args.minutes <= OVERRIDE_MAX_MINUTES:
+        raise SystemExit(f'--minutes must be between 1 and {OVERRIDE_MAX_MINUTES}')
+    if args.action == 'allow' and args.minutes is None:
+        # An open-ended allow would silently switch off every schedule and quota.
+        raise SystemExit('--minutes is required for allow')
+    device = enabled_device(con, args.device)
+    now = int(time.time())
+    expires = now + args.minutes * 60 if args.minutes is not None else None
+    try:
+        con.execute("""INSERT INTO device_overrides(device_id,action,expires_at,source,note,created_at)
+            VALUES(?,?,?,?,?,?) ON CONFLICT(device_id) DO UPDATE SET action=excluded.action,
+            expires_at=excluded.expires_at,source=excluded.source,note=excluded.note,
+            created_at=excluded.created_at""",
+            (args.device, args.action, expires, args.source, note, now))
+        con.execute("""INSERT INTO device_override_log
+            (event_time,device_id,device_name,event,expires_at,source,note) VALUES(?,?,?,?,?,?,?)""",
+            (now, args.device, device['name'], args.action, expires, args.source, note))
+        con.commit()
+    except Exception:
+        con.rollback()
+        raise
+    verb = 'allowed' if args.action == 'allow' else 'blocked'
+    print(f"{device['name']} {verb} {until_text(expires, now)}")
+
+def clear_override(con, args):
+    note = override_args(args)
+    device = enabled_device(con, args.device)
+    now = int(time.time())
+    try:
+        removed = con.execute("DELETE FROM device_overrides WHERE device_id=?", (args.device,)).rowcount
+        if removed:
+            con.execute("""INSERT INTO device_override_log
+                (event_time,device_id,device_name,event,source,note) VALUES(?,?,?,'clear',?,?)""",
+                (now, args.device, device['name'], args.source, note))
+        con.commit()
+    except Exception:
+        con.rollback()
+        raise
+    print(f"{device['name']}: override cleared; normal policies apply" if removed
+          else f"{device['name']}: no override was set")
+
+def list_overrides(con):
+    now = int(time.time())
+    for device_id, r in active_overrides(con, now).items():
+        print(f"{device_id}\t{r['name']}\t{r['action']}\t{r['expires_at'] if r['expires_at'] is not None else '-'}\t"
+              f"{r['source']}\t{until_text(r['expires_at'], now)}\t{r['note'] or '-'}")
+
 def evaluate(con):
     # Schedules use the router's local time (System > Time zone). Avoid
     # zoneinfo's optional tzdata dependency on minimal OpenWrt images.
     now = datetime.now()
+    overrides = active_overrides(con, int(now.timestamp()))
+    # A device override is listed first so it is visible even for devices
+    # without any policy; it then decides every policy row of that device.
+    for device_id, o in overrides.items():
+        print(f"device override\t{device_id}\t{o['name']}\t{o['action']}\t{override_text(o, int(now.timestamp()))}")
     minute = now.hour * 60 + now.minute
     # Python weekday is Monday=0; policy representation is Sunday=0.
     day = (now.weekday() + 1) % 7
@@ -501,6 +602,10 @@ def evaluate(con):
                 reason = f"{used}/{quota} bytes"
                 if evidence:
                     reason += f"; {evidence['domain']} -> {evidence['destination_ip']}"
+            o = overrides.get(int(d['device_id']))
+            if o is not None and decision != o['action']:
+                reason = f"{reason}; device override {override_text(o, int(now.timestamp()))}"
+                decision = o['action']
             print(f"{p['name']}\t{d['device_id']}\t{d['name']}\t{decision}\t{reason}")
 
 def main():
@@ -554,12 +659,29 @@ def main():
     a.add_argument('--quota', type=int, required=True, help='new daily quota in bytes')
     a = sub.add_parser('reset-quota', help="reset today's measured quota for a policy")
     a.add_argument('--policy-id', type=int, required=True)
+    sub.add_parser('overrides', help='list active per-device overrides')
+    a = sub.add_parser('override', help='allow or block one device, overriding its policies')
+    a.add_argument('--device', type=int, required=True)
+    a.add_argument('--action', choices=['allow', 'block'], required=True)
+    a.add_argument('--minutes', type=int, help='expire after N minutes (required for allow; block without it lasts until cleared)')
+    a.add_argument('--source', default='cli', help='cli, luci or telegram')
+    a.add_argument('--note', help='who/why, at most 80 characters')
+    a = sub.add_parser('clear-override', help="remove a device's override; its normal policies apply again")
+    a.add_argument('--device', type=int, required=True)
+    a.add_argument('--source', default='cli', help='cli, luci or telegram')
+    a.add_argument('--note', help='who/why, at most 80 characters')
     args = p.parse_args()
     if args.command == 'groups':
         print('\n'.join(allowed_groups()))
         return 0
+    override_commands = {'overrides': lambda con: list_overrides(con),
+                         'override': lambda con: set_override(con, args),
+                         'clear-override': lambda con: clear_override(con, args)}
     try:
         with db(args.db) as con:
+            if args.command in override_commands:
+                override_commands[args.command](con)
+                return 0
             list_policies(con) if args.command == 'list' else list_devices(con) if args.command == 'devices' else list_unresolved(con) if args.command == 'unresolved' else sync_devices(con, args) if args.command == 'sync-devices' else add_device(con, args) if args.command == 'add-device' else delete_device(con, args) if args.command == 'delete-device' else associate_mac(con, args) if args.command == 'associate-mac' else forget_unresolved(con, args) if args.command == 'forget-unresolved' else exclusions(args) if args.command == 'exclusions' else evaluate(con) if args.command == 'evaluate' else add_policy(con, args) if args.command == 'add' else edit_policy(con, args) if args.command == 'edit' else delete_policy(con, args) if args.command == 'delete' else set_quota(con, args) if args.command == 'set-quota' else reset_quota(con, args)
     except sqlite3.Error as exc:
         print(f"r3s-policy: database error: {exc}", file=sys.stderr); return 1

@@ -30,6 +30,9 @@
         "/usr/bin/r3s-policy *": [
           "exec"
         ],
+        "/usr/bin/r3s-policy-evaluator --overrides-only": [
+          "exec"
+        ],
         "/usr/bin/r3s-telegram-setup": [
           "exec"
         ],

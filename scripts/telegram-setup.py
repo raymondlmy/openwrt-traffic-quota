@@ -10,6 +10,7 @@
   r3s-telegram-setup test             send a test message
   r3s-telegram-setup schedule [--daily on|off] [--daily-time HH:MM]
                               [--daily-health on|off] [--quota on|off] [--health on|off]
+                              [--commands on|off]   (Telegram /block /unblock /extend)
 
 The secrets file is sourced by the shell report scripts, so the token and chat
 ID are validated strictly and the token is never passed on a command line:
@@ -30,6 +31,9 @@ SECRETS = os.environ.get("R3S_TELEGRAM_SECRETS", "/etc/r3s-accounting/secrets")
 PENDING = SECRETS + ".new"
 CRONTAB_FILE = os.environ.get("R3S_CRONTAB_FILE", "")   # tests: edit a file, not crontab
 CURL = os.environ.get("R3S_CURL", "curl")
+UCI = os.environ.get("R3S_UCI", "uci")
+BOT_INIT = os.environ.get("R3S_BOT_INIT", "/etc/init.d/r3s-telegram-bot")
+BOT_OPTION = "r3s-accounting.main.telegram_bot"
 TOKEN_RE = re.compile(r"[0-9]{5,15}:[A-Za-z0-9_-]{30,64}")
 CHAT_RE = re.compile(r"-?[0-9]{1,20}|@[A-Za-z][A-Za-z0-9_]{4,31}")
 TIME_RE = re.compile(r"([01][0-9]|2[0-3]):([0-5][0-9])")
@@ -140,12 +144,42 @@ def cron_jobs() -> dict[str, str]:
     return jobs
 
 
+# ---- Telegram commands service ----
+def run_quiet(command: list[str]) -> subprocess.CompletedProcess[str] | None:
+    try:
+        return subprocess.run(command, capture_output=True, text=True, check=False)
+    except FileNotFoundError:
+        return None
+
+
+def commands_enabled() -> bool:
+    result = run_quiet([UCI, "-q", "get", BOT_OPTION])
+    return bool(result and result.returncode == 0 and result.stdout.strip() == "1")
+
+
+def set_commands(on: bool) -> None:
+    if on:
+        chat = read_values(SECRETS).get("TELEGRAM_CHAT_ID", "")
+        # Only a private chat is safe: in a group every member could send commands.
+        if not re.fullmatch(r"[0-9]{1,20}", chat):
+            raise SetupError("Telegram commands need a private chat with the bot "
+                             "(a positive chat ID); group chats and channels are not supported")
+    for command in ([UCI, "set", f"{BOT_OPTION}={'1' if on else '0'}"], [UCI, "commit", "r3s-accounting"]):
+        result = run_quiet(command)
+        if result is None or result.returncode != 0:
+            raise SetupError("could not save the Telegram commands setting (uci)")
+    if os.path.exists(BOT_INIT):
+        for action in (("enable", "restart") if on else ("stop",)):
+            run_quiet([BOT_INIT, action])
+
+
 # ---- commands ----
 def cmd_status(_args) -> int:
     values = read_values(SECRETS)
     token, chat = values.get("TELEGRAM_BOT_TOKEN", ""), values.get("TELEGRAM_CHAT_ID", "")
     status = {"token_set": bool(token), "chat_id": chat, "bot": None, "error": None,
               "jobs": {name: name in cron_jobs() for name in JOBS},
+              "commands": commands_enabled(),
               "daily_time": None}
     daily = cron_jobs().get("daily")
     if daily:
@@ -189,7 +223,16 @@ def cmd_detect_chat(_args) -> int:
     if not token:
         raise SetupError("save the bot token first")
     chats: dict[str, str] = {}
-    for update in api(token, "getUpdates").get("result", []):
+    # The command bot long-polls the same update stream; pause it meanwhile.
+    paused = commands_enabled() and os.path.exists(BOT_INIT)
+    if paused:
+        run_quiet([BOT_INIT, "stop"])
+    try:
+        updates = api(token, "getUpdates").get("result", [])
+    finally:
+        if paused:
+            run_quiet([BOT_INIT, "start"])
+    for update in updates:
         for key in ("message", "channel_post", "my_chat_member"):
             chat = (update.get(key) or {}).get("chat")
             if chat and "id" in chat:
@@ -226,6 +269,8 @@ def cmd_schedule(args) -> int:
             schedule = f"{int(minute)} {int(hour)} * * *"
         lines.append(f"{schedule} {command} >/dev/null 2>&1 {MARK}{name}")
     cron_write(lines)
+    if args.commands:
+        set_commands(args.commands == "on")
     print("Schedule saved: " + (", ".join(n for n in JOBS if any(l.endswith(MARK + n) for l in lines)) or "nothing enabled"))
     return 0
 
@@ -246,7 +291,8 @@ def cmd_interactive(_args) -> int:
     write_secrets(token, chat)
     cmd_test(None)
     if input("Enable all reports (daily 06:00, quota and health alerts)? [Y/n] ").strip().lower() in ("", "y", "yes"):
-        cmd_schedule(argparse.Namespace(daily="on", daily_health="on", quota="on", health="on", daily_time=None))
+        cmd_schedule(argparse.Namespace(daily="on", daily_health="on", quota="on", health="on",
+                                        daily_time=None, commands=None))
     return 0
 
 
@@ -258,7 +304,7 @@ def main() -> int:
     sub.add_parser("detect-chat")
     sub.add_parser("test")
     s = sub.add_parser("schedule")
-    for opt in ("--daily", "--daily-health", "--quota", "--health"):
+    for opt in ("--daily", "--daily-health", "--quota", "--health", "--commands"):
         s.add_argument(opt, choices=("on", "off"))
     s.add_argument("--daily-time")
     args = parser.parse_args()

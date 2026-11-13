@@ -47,6 +47,8 @@ jobs:
           python3 tests/test_ipv6_units.py
           python3 tests/test_groups.py
           python3 tests/test_telegram_setup.py
+          python3 tests/test_device_overrides.py
+          python3 tests/test_telegram_bot.py
           python3 tests/collector_undercount_sim.py
           bash tests/test_registry_upgrade.sh
       # Ubuntu 24.04 restricts unprivileged user namespaces, so the
