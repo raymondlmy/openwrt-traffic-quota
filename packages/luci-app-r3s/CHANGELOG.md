@@ -1,5 +1,12 @@
 # luci-app-r3s changelog
 
+## 0.6.0-2 - 2026-11-13
+
+- **Policies by Device** table under Policy Management: one row per device
+  listing its schedules and quotas (disabled ones marked) and whether it is
+  blocked right now, and by which policy. Previously a device's schedule was
+  only visible by scanning every policy's device list.
+
 ## 0.6.0-1 - 2026-10-28
 
 First public release, from a private home-router project (last private

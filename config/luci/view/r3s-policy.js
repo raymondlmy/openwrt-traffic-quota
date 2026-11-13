@@ -112,6 +112,56 @@ function scheduleText(days, start, end) {
     return '%s %s-%s'.format(label, minuteText(start), minuteText(end));
 }
 
+// Invert policy -> devices into device -> policies so each device's schedules
+// and quotas are visible without scanning every policy row.
+function devicePolicySummary(devices, policies, decisions) {
+    return devices.filter(function(device) {
+        return device.enabled === '1';
+    }).map(function(device) {
+        var schedules = [];
+        var quotas = [];
+        policies.forEach(function(policy) {
+            if (policy.deviceIds.split(',').indexOf(device.id) === -1)
+                return;
+            var off = policy.enabled === '1' ? '' : ' (disabled)';
+            if (policy.type === 'schedule')
+                schedules.push('%s: %s%s'.format(policy.name, scheduleText(policy.days, policy.start, policy.end), off));
+            else if (policy.type === 'service_quota')
+                quotas.push('%s: %s/day%s'.format(policy.name, mb(policy.quota), off));
+        });
+        var blockedBy = decisions.filter(function(row) {
+            return row.deviceId === device.id && row.decision === 'block';
+        }).map(function(row) {
+            return row.policy;
+        });
+        var status = '-';
+        if (blockedBy.length)
+            status = 'Blocked (%s)'.format(blockedBy.join(', '));
+        else if (schedules.length || quotas.length)
+            status = 'Allowed';
+        return {
+            id: device.id,
+            name: device.name,
+            group: device.group,
+            schedules: schedules,
+            quotas: quotas,
+            status: status
+        };
+    });
+}
+
+function lineList(items) {
+    if (!items.length)
+        return '-';
+    var out = [];
+    items.forEach(function(item, index) {
+        if (index)
+            out.push(E('br'));
+        out.push(item);
+    });
+    return out;
+}
+
 function parseTime(value) {
     var match = String(value || '').match(/^(\d{1,2}):(\d{2})$/);
     if (!match)
@@ -419,6 +469,16 @@ return view.extend({
                 E('td', { 'class': 'td' }, actions)
             ]);
         }, this) : [E('tr', { 'class': 'tr' }, E('td', { 'class': 'td', 'colspan': 9 }, _('No policies configured')))];
+        var deviceSummary = devicePolicySummary(devices, policies, decisions);
+        var devicePolicyTableRows = deviceSummary.length ? deviceSummary.map(function(row) {
+            return E('tr', { 'class': 'tr' }, [
+                E('td', { 'class': 'td' }, '%s %s'.format(row.id, row.name)),
+                E('td', { 'class': 'td' }, row.group),
+                E('td', { 'class': 'td' }, lineList(row.schedules)),
+                E('td', { 'class': 'td' }, lineList(row.quotas)),
+                E('td', { 'class': 'td' }, row.status)
+            ]);
+        }) : [E('tr', { 'class': 'tr' }, E('td', { 'class': 'td', 'colspan': 5 }, _('No devices registered')))];
         var decisionTableRows = decisions.length ? decisions.map(function(row) {
             return E('tr', { 'class': 'tr' }, [
                 E('td', { 'class': 'td' }, row.policy),
@@ -516,6 +576,17 @@ return view.extend({
                     E('th', { 'class': 'th' }, _('Actions'))
                 ]),
             ].concat(policyTableRows)),
+
+            E('h4', {}, _('Policies by Device')),
+            E('table', { 'class': 'table' }, [
+                E('tr', { 'class': 'tr table-titles' }, [
+                    E('th', { 'class': 'th' }, _('Device')),
+                    E('th', { 'class': 'th' }, _('Group')),
+                    E('th', { 'class': 'th' }, _('Schedules')),
+                    E('th', { 'class': 'th' }, _('Quotas')),
+                    E('th', { 'class': 'th' }, _('Now'))
+                ]),
+            ].concat(devicePolicyTableRows)),
 
             E('h4', {}, _('Current Decisions')),
             E('table', { 'class': 'table' }, [
