@@ -1,6 +1,6 @@
 # r3s-accounting-telegram changelog
 
-## Unreleased
+## 0.6.1-2 - 2026-11-15
 
 - `/extend` lifts internet schedules only; game/site quotas and site
   schedules stay enforced (needs the matching `r3s-accounting`). The reply

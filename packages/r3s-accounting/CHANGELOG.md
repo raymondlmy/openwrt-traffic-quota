@@ -1,6 +1,6 @@
 # r3s-accounting changelog
 
-## Unreleased
+## 0.6.1-2 - 2026-11-15
 
 - An `allow` device override (extra time, `/extend`) now lifts only
   whole-internet schedules. Site policies (custom-domain quotas and site
