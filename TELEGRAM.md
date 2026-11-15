@@ -69,7 +69,7 @@ Optional and off by default. Turn it on in **Services → Telegram Reports →
 ```
 /status                     what is blocked right now, and why
 /block NAME [30m|2h|23:00]  block a device (until /unblock, or for a while)
-/extend NAME 30m|2h|23:00   let a device online despite its schedules and quotas
+/extend NAME 30m|2h|23:00   let a device online despite its internet schedules
 /unblock NAME               remove your block or extra time
 /devices                    device names
 ```
@@ -86,10 +86,12 @@ How it works and what keeps it safe:
   `/etc/r3s-accounting/secrets`, and only if it is a private chat with the
   bot (in a group, every member could send commands). Anyone else is
   ignored, and you get a notice (at most 5 an hour).
-- **Per device.** An override affects only the device you name, across all of
-  its policies. Extra time always ends by itself (12 hours at most); usage is
-  still counted during it, so a used-up quota blocks again afterwards. You get
-  a message when it ends.
+- **Per device.** An override affects only the device you name. A block covers
+  all of its policies. Extra time lifts only its **internet schedules** (whole-
+  device blocks such as a bedtime): **site policies stay enforced**, so a used-up
+  game quota or a site schedule keeps blocking those sites during the extra
+  time, and the reply says which. Extra time always ends by itself (12 hours at
+  most). You get a message when it ends.
 - **Nothing replayed.** A command that waited more than 2 minutes (bot or
   router down) is skipped, and you are told.
 - **Visible.** Overrides show in the policy page (**Policies by Device**, with a
@@ -97,7 +99,9 @@ How it works and what keeps it safe:
   (`device_override_log`, and `logread -e r3s-telegram-bot`).
 
 `/unblock` only removes your override. If a schedule is active the device stays
-blocked, and the reply says so; use `/extend` to let it online anyway.
+blocked, and the reply says so; use `/extend` to lift internet schedules anyway.
+To lift a site policy, use its own override on the policy page (it applies to
+every device in that policy).
 
 Type `/` in the chat for the command menu, or send `/help`. Names may contain
 spaces and need no quotes (`/block living room tv 30m`); the start of a name is

@@ -561,7 +561,8 @@ def evaluate(con):
     now = datetime.now()
     overrides = active_overrides(con, int(now.timestamp()))
     # A device override is listed first so it is visible even for devices
-    # without any policy; it then decides every policy row of that device.
+    # without any policy; a block then decides every policy row of that
+    # device, an allow only its whole-internet rows.
     for device_id, o in overrides.items():
         print(f"device override\t{device_id}\t{o['name']}\t{o['action']}\t{override_text(o, int(now.timestamp()))}")
     minute = now.hour * 60 + now.minute
@@ -603,7 +604,10 @@ def evaluate(con):
                 if evidence:
                     reason += f"; {evidence['domain']} -> {evidence['destination_ip']}"
             o = overrides.get(int(d['device_id']))
-            if o is not None and decision != o['action']:
+            # 'allow' (extra time) lifts whole-internet policies only; site
+            # quotas and site schedules stay enforced. 'block' wins everywhere.
+            if (o is not None and decision != o['action']
+                    and (o['action'] == 'block' or p['service'] != 'custom')):
                 reason = f"{reason}; device override {override_text(o, int(now.timestamp()))}"
                 decision = o['action']
             print(f"{p['name']}\t{d['device_id']}\t{d['name']}\t{decision}\t{reason}")
@@ -660,7 +664,7 @@ def main():
     a = sub.add_parser('reset-quota', help="reset today's measured quota for a policy")
     a.add_argument('--policy-id', type=int, required=True)
     sub.add_parser('overrides', help='list active per-device overrides')
-    a = sub.add_parser('override', help='allow or block one device, overriding its policies')
+    a = sub.add_parser('override', help='block one device (all policies), or allow it past its internet schedules (site quotas and site schedules still apply)')
     a.add_argument('--device', type=int, required=True)
     a.add_argument('--action', choices=['allow', 'block'], required=True)
     a.add_argument('--minutes', type=int, help='expire after N minutes (required for allow; block without it lasts until cleared)')

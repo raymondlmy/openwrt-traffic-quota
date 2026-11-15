@@ -41,6 +41,11 @@ def main() -> None:
                    end_minute,created_at,updated_at) VALUES(1,'night','schedule','internet',
                    '0,1,2,3,4,5,6',0,1439,0,0)""")
     con.executemany("INSERT INTO policy_rule_devices VALUES(1,?)", [(1,), (3,)])
+    # A site policy held blocked, so /extend can be shown not to lift it.
+    con.execute("""INSERT INTO policy_rules(policy_id,name,policy_type,service,domains,quota_bytes,period,
+                   manual_override,created_at,updated_at) VALUES(2,'games','service_quota','custom',
+                   'example.com',100,'daily','block',0,0)""")
+    con.execute("INSERT INTO policy_rule_devices VALUES(2,1)")
     con.commit()
 
     policy = work / "r3s-policy"
@@ -103,11 +108,14 @@ def main() -> None:
     check("/extend sets a 30-minute allow from telegram",
           row is not None and row[0] == "allow" and row[2] == "telegram" and row[3] == "by Owner"
           and 1790 <= row[1] - time.time() <= 1800)
-    check("/extend reply explains", reply.startswith("🟢 laptop-1 allowed until") and "usage is still counted" in reply)
+    check("/extend reply explains", reply.startswith("🟢 laptop-1 allowed until")
+          and "Internet schedules apply again" in reply)
+    check("/extend reply says site limits stay", "Site limits are not lifted: still blocked by games" in reply)
     check("evaluator fast path run", "--overrides-only" in evaluator_log.read_text())
     reply = say("/status")
     check("/status no longer lists the extended device as blocked",
           "laptop-1: night" not in reply and "phone-1: night" in reply and "laptop-1: allowed until" in reply)
+    check("/status still lists the site policy for the extended device", "laptop-1: games" in reply)
 
     reply = say("/block tv-1")
     check("/block with no time lasts until cleared", override(4)[0] == "block" and override(4)[1] is None
@@ -119,7 +127,7 @@ def main() -> None:
     check("/unblock clears the override", override(4) is None and "override cleared" in reply)
     reply = say("/unblock laptop-1")
     check("/unblock of a scheduled device says it is still blocked",
-          override(1) is None and "Still blocked by night" in reply and "/extend laptop-1 30m" in reply)
+          override(1) is None and "Still blocked by night, games" in reply and "/extend laptop-1 30m" in reply)
 
     # ---- durations ----
     now = datetime(2026, 11, 13, 21, 0, 30)

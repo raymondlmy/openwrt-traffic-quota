@@ -15,8 +15,8 @@ for OpenWrt routers, over **IPv4 and IPv6**.
 - **Telegram reports** (optional): a daily traffic report, quota alerts and
   router-health alerts, set up from LuCI. See [TELEGRAM.md](TELEGRAM.md).
 - **Telegram commands** (optional, off by default): from your phone, block a
-  device, give it extra time past its schedule or quota, or see what is
-  blocked and why:
+  device, give it extra time past its internet schedule (game/site quotas
+  still apply), or see what is blocked and why:
 
   ```
   /status

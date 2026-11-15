@@ -1,5 +1,15 @@
 # r3s-accounting changelog
 
+## Unreleased
+
+- An `allow` device override (extra time, `/extend`) now lifts only
+  whole-internet schedules. Site policies (custom-domain quotas and site
+  schedules, e.g. game quotas) stay enforced for that device. Previously it
+  lifted every policy, so extra time for homework also opened the game sites
+  without limit until it ended. `block` overrides are unchanged. The
+  `--overrides-only` fast pass no longer releases site-block pairs.
+  `r3s-policy evaluate` shows site rows as still blocked.
+
 ## 0.6.1-1 - 2026-11-13
 
 - Per-device overrides: `r3s-policy override --device ID --action allow|block

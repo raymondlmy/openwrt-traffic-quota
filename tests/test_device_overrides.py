@@ -110,7 +110,8 @@ def main() -> None:
     check("without overrides: schedule blocks 1 and 2 only",
           "192.168.1.31" in applied[-1] and "192.168.1.21" not in applied[-1])
 
-    # Custom-site block: an allowed device gets no pairs; another device does.
+    # Custom-site block: an allow override (extra time) does not lift site
+    # policies, so the allowed device keeps its pairs like any other.
     con.execute("""INSERT INTO policy_rules(policy_id,name,policy_type,service,domains,quota_bytes,period,
                    manual_override,created_at,updated_at) VALUES(2,'games','service_quota','custom',
                    'example.com',100,'daily','block',0,0)""")
@@ -118,11 +119,17 @@ def main() -> None:
     quota_rows = ev.active_custom_quota_rows(con)
     applied.clear()
     ev.decide_custom_blocks(con, quota_rows, [], ips, {2: {"93.184.215.14", "2606:2800:21f:cb07::1"}},
-                            {}, now, macs, allowed_override={1})
+                            {}, now, macs)
     script = applied[-1]
-    check("site block skips allowed device", "192.168.1.31 . " not in script and "aa:bb:cc:00:00:01 . " not in script)
+    check("site block still applies to the allowed device",
+          "192.168.1.31 . 93.184.215.14" in script and "aa:bb:cc:00:00:01 . 2606:2800:21f:cb07::1" in script)
     check("site block still applies to other device",
           "192.168.1.32 . 93.184.215.14" in script and "aa:bb:cc:00:00:02 . 2606:2800:21f:cb07::1" in script)
+    con.commit()
+    rows = {(r.split("\t")[0], r.split("\t")[1]): r.split("\t") for r in cli(db, "evaluate").stdout.splitlines()}
+    check("evaluate: allow lifts the internet schedule", rows[("night", "1")][3] == "allow")
+    check("evaluate: allow leaves the site policy blocked",
+          rows[("games", "1")][3] == "block" and "device override" not in rows[("games", "1")][4])
 
     # Expiry: logged once as 'expire', row removed, device no longer allowed.
     con.execute("UPDATE device_overrides SET expires_at=? WHERE device_id=1", (now - 5,))
@@ -141,22 +148,6 @@ def main() -> None:
     sqlite3.connect(old).execute("CREATE TABLE devices(device_id INTEGER, name TEXT, enabled INTEGER)")
     check("evaluator tolerates missing tables", ev.load_overrides(ev.open_database(str(old)), now) == (set(), set()))
     check("CLI evaluate tolerates missing tables", cli(old, "overrides").returncode == 0)
-
-    # ---- nft pair-set parsing and fast release ----
-    listing = {"nftables": [{"metainfo": {}}, {"set": {"name": "blocked_custom_pair", "elem": [
-        {"concat": ["192.168.1.31", "93.184.215.14"]},
-        {"elem": {"val": {"concat": ["192.168.1.32", "93.184.215.14"]}, "timeout": 86400}},
-        {"concat": ["192.168.1.31", "not-an-ip"]},
-    ]}}]}
-    ev.run_command = lambda command, stdin=None: subprocess.CompletedProcess(command, 0, json.dumps(listing), "")
-    pairs = ev.read_pair_set("blocked_custom_pair")
-    check("pair set parsed in both element forms", ("192.168.1.31", "93.184.215.14") in pairs
-          and ("192.168.1.32", "93.184.215.14") in pairs)
-    applied.clear()
-    ev.release_custom_pairs({1}, {1: {"192.168.1.31"}}, {})
-    check("fast release deletes only the allowed device's valid pairs",
-          len(applied) == 1 and "192.168.1.31 . 93.184.215.14" in applied[0]
-          and "192.168.1.32" not in applied[0] and "not-an-ip" not in applied[0])
 
     print()
     print("ALL PASSED" if not fails else f"{fails} FAILED")

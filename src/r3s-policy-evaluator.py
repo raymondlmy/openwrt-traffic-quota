@@ -668,7 +668,9 @@ def decide_schedule_blocks(
             )
         )
     }
-    # Per-device overrides win over every policy: allow lifts, block adds.
+    # Per-device overrides decide the whole-device block: allow lifts these
+    # internet schedules, block adds. Site policies (decide_custom_blocks) are
+    # deliberately not lifted by an allow override.
     blocked_devices -= allowed_override or set()
     blocked_devices |= blocked_override or set()
     blocked_ips = sorted(
@@ -725,20 +727,18 @@ def decide_custom_blocks(
     client_dns_destinations: dict[tuple[int, str], set[str]],
     now: int,
     device_macs: dict[int, set[str]] | None = None,
-    allowed_override: set[int] | None = None,
 ) -> None:
-    """Block only the device/destination pairs owned by an active custom policy."""
+    """Block only the device/destination pairs owned by an active custom policy.
+
+    Per-device 'allow' overrides (/extend) do not apply here: extra time is for
+    general internet access, not for lifting site quotas or site schedules.
+    """
     today = local_period_start(now)
     device_macs = device_macs or {}
-    allowed_override = allowed_override or set()
     blocked_pairs: set[tuple[str, str]] = set()
     blocked_pairs6: set[tuple[str, str]] = set()
 
     def block_policy_device(policy_id: int, device_id: int) -> None:
-        # An 'allow' override lifts the block; usage is still counted and the
-        # stored quota state is unchanged, so the block returns on expiry.
-        if device_id in allowed_override:
-            return
         sources = device_ips.get(device_id, set())
         destinations = set(policy_destinations.get(policy_id, set()))
         for source in sources:
@@ -853,57 +853,6 @@ def device_addresses(
     return ips, macs
 
 
-def read_pair_set(setname: str) -> list[tuple[str, str]]:
-    """Elements of a concatenated 'a . b' set as (a, b) tuples."""
-    raw = run_command([NFT, "-j", "list", "set", "inet", NFT_TABLE, setname]).stdout
-    try:
-        document: Any = json.loads(raw)
-    except json.JSONDecodeError as exc:
-        fail(f"invalid nft JSON for {setname}: {exc}")
-    pairs: list[tuple[str, str]] = []
-    for item in document.get("nftables", []) if isinstance(document, dict) else []:
-        set_object = item.get("set") if isinstance(item, dict) else None
-        if not isinstance(set_object, dict):
-            continue
-        for element in set_object.get("elem", []) or []:
-            # Plain {"concat": [...]}, or {"elem": {"val": {"concat": [...]}, "timeout": ...}}.
-            if isinstance(element, dict) and isinstance(element.get("elem"), dict):
-                element = element["elem"].get("val")
-            parts = element.get("concat") if isinstance(element, dict) else None
-            if isinstance(parts, list) and len(parts) == 2:
-                pairs.append((str(parts[0]), str(parts[1])))
-    return pairs
-
-
-def release_custom_pairs(
-    allowed: set[int], device_ips: dict[int, set[str]], device_macs: dict[int, set[str]]
-) -> None:
-    """Fast path: drop site-block pairs whose source is an allowed device."""
-    sources4 = {ip for d in allowed for ip in by_family(device_ips.get(d, set()), 4)}
-    sources6 = {mac for d in allowed for mac in device_macs.get(d, set())}
-    commands: list[str] = []
-    for setname, sources in (("blocked_custom_pair", sources4), ("blocked_custom_pair6", sources6)):
-        if not sources:
-            continue
-        for source, destination in read_pair_set(setname):
-            # Values come from nft and our own canonical sets; re-validate
-            # before writing them back into an nft command.
-            if source in sources and _is_ip(destination):
-                commands.append(
-                    f"delete element inet {NFT_TABLE} {setname} {{ {source} . {destination} }}"
-                )
-    if commands:
-        apply_nft("\n".join(commands) + "\n")
-
-
-def _is_ip(value: str) -> bool:
-    try:
-        ipaddress.ip_address(value)
-    except ValueError:
-        return False
-    return True
-
-
 def verify_nft() -> None:
     run_command([NFT, "list", "table", "inet", NFT_TABLE])
 
@@ -932,7 +881,6 @@ def main() -> int:
             ips, macs = device_addresses(con, ids)
             decide_schedule_blocks(schedule_rows, ips, now, device_macs=macs,
                                    allowed_override=allowed, blocked_override=blocked)
-            release_custom_pairs(allowed, ips, macs)
             con.commit()
         return 0
     with open_database(args.db) as con:
@@ -991,7 +939,6 @@ def main() -> int:
             custom_dns,
             now,
             device_macs,
-            allowed_override=allowed,
         )
         # Only quota rows are passed here: schedules never produce Telegram
         # alerts, even when their block is currently active.

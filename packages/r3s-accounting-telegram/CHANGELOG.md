@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- `/extend` lifts internet schedules only; game/site quotas and site
+  schedules stay enforced (needs the matching `r3s-accounting`). The reply
+  names any site policy still blocking the device.
 - Bot polls with a 50 s long-poll timeout (was 25 s): half the requests to
   Telegram (about 1,700 a day instead of 3,500). Commands still arrive at
   once; an "override ended" notice can take up to ~50 s.

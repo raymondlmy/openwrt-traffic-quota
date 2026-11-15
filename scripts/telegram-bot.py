@@ -40,7 +40,7 @@ INTRUDER_REPORTS_PER_HOUR = 5  # in total
 HELP = """Commands:
 /status - what is blocked right now, and why
 /block NAME [30m|2h|23:00] - block a device (until /unblock, or for a while)
-/extend NAME 30m|2h|23:00 - let a device online despite its schedules/quotas
+/extend NAME 30m|2h|23:00 - let a device online despite its internet schedules (game/site limits still apply)
 /unblock NAME - remove your block/extend; normal policies apply again
 /devices - device names
 
@@ -244,7 +244,11 @@ def cmd_extend(rest: str, who: str) -> str:
     device_id, device = find_device(name)
     reply = "🟢 " + change(["override", "--device", str(device_id), "--action", "allow",
                              "--minutes", str(minutes)], who)
-    return reply + "\nSchedules and quotas apply again afterwards; usage is still counted."
+    reply += "\nInternet schedules apply again afterwards."
+    still = blocked_by(device_id)
+    if still:
+        reply += f"\nSite limits are not lifted: still blocked by {', '.join(still)}."
+    return reply
 
 
 def cmd_unblock(rest: str, who: str) -> str:
@@ -253,7 +257,7 @@ def cmd_unblock(rest: str, who: str) -> str:
     still = blocked_by(device_id)
     if still:
         reply += (f"\nStill blocked by {', '.join(still)}. "
-                  f"To let it online anyway: /extend {device} 30m")
+                  f"To lift internet schedules anyway: /extend {device} 30m")
     return reply
 
 
