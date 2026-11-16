@@ -1,5 +1,21 @@
 # r3s-accounting changelog
 
+## 0.6.1-3 - 2026-11-16
+
+- Game time: `r3s-policy override --action allow --lift-sites --minutes N`
+  lifts that one device's internet schedules **and** its site policies
+  (custom-domain quotas and site schedules, e.g. game quotas) until it
+  expires. A plain allow (`/extend`) is unchanged and still leaves site
+  policies enforced. Usage is still counted; blocks return on expiry.
+  Replacing the override with a plain allow or a block drops the lift.
+- Migration 014 adds `lift_sites` to `device_overrides` and
+  `device_override_log`. postinst runs it only when the column is missing.
+  Without it, overrides still work and `--lift-sites` is refused.
+- `--overrides-only` fast pass again releases site-block pairs, but only for
+  devices with a site-lifting allow, so game time starts within seconds.
+- `r3s-policy evaluate` shows those rows as `games allowed until HH:MM`;
+  `r3s-policy overrides` gains a last column (`sites` or `-`).
+
 ## 0.6.1-2 - 2026-11-15
 
 - An `allow` device override (extra time, `/extend`) now lifts only

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: GPL-2.0-only
 # Copyright (C) 2026 Graype
-"""Telegram commands for per-device overrides: block, unblock, extend, status.
+"""Telegram commands for per-device overrides: block, unblock, extend, game, status.
 
 Runs as a procd service (r3s-telegram-bot). It long-polls the Bot API with
 getUpdates, so every connection is outbound HTTPS to api.telegram.org:
@@ -33,6 +33,7 @@ OFFSET_FILE = os.path.join(STATE_DIR, "telegram-bot.offset")
 POLL_SECONDS = 50  # Telegram holds each request open this long; commands still arrive at once
 MAX_AGE = 120            # ignore commands older than this (queued while the bot was down)
 MAX_EXTEND = 12 * 60     # minutes
+MAX_GAME = 3 * 60        # minutes
 MAX_BLOCK = 7 * 24 * 60  # minutes
 INTRUDER_REPORT_EVERY = 3600  # per sender
 INTRUDER_REPORTS_PER_HOUR = 5  # in total
@@ -41,7 +42,8 @@ HELP = """Commands:
 /status - what is blocked right now, and why
 /block NAME [30m|2h|23:00] - block a device (until /unblock, or for a while)
 /extend NAME 30m|2h|23:00 - let a device online despite its internet schedules (game/site limits still apply)
-/unblock NAME - remove your block/extend; normal policies apply again
+/game NAME 1h - game time: internet schedules AND game/site limits lifted for that device only (up to 3h)
+/unblock NAME - remove your block/extend/game; normal policies apply again
 /devices - device names
 
 NAME can be the start of a name, e.g. /extend lap 30m"""
@@ -51,6 +53,7 @@ NAME can be the start of a name, e.g. /extend lap 30m"""
 MENU = [
     ("status", "What is blocked right now, and why"),
     ("extend", "Extra time: /extend NAME 30m (or 2h, 23:00)"),
+    ("game", "Game time, game limits lifted: /game NAME 1h"),
     ("block", "Block a device: /block NAME [30m|2h|23:00]"),
     ("unblock", "Remove your block or extra time: /unblock NAME"),
     ("devices", "Device names"),
@@ -251,6 +254,20 @@ def cmd_extend(rest: str, who: str) -> str:
     return reply
 
 
+def cmd_game(rest: str, who: str) -> str:
+    name, minutes = split_name_duration(rest)
+    if minutes is None:
+        raise BotError("How long? e.g. /game " + (name or "NAME") + " 1h  (or 45m, or 20:30)")
+    if not 1 <= minutes <= MAX_GAME:
+        raise BotError("Game time can be up to 3 hours.")
+    device_id, device = find_device(name)
+    reply = "🎮 " + change(["override", "--device", str(device_id), "--action", "allow",
+                             "--lift-sites", "--minutes", str(minutes)], who)
+    reply += (f"\nInternet schedules and game/site limits are lifted for {device} only. "
+              "Everything applies again afterwards; /unblock ends it early.")
+    return reply
+
+
 def cmd_unblock(rest: str, who: str) -> str:
     device_id, device = find_device(rest)
     reply = "↩️ " + change(["clear-override", "--device", str(device_id)], who)
@@ -273,6 +290,8 @@ def handle(text: str, who: str) -> str:
         return cmd_block(rest, who)
     if command in ("/extend", "/allow"):
         return cmd_extend(rest, who)
+    if command == "/game":
+        return cmd_game(rest, who)
     if command == "/unblock":
         return cmd_unblock(rest, who)
     return HELP

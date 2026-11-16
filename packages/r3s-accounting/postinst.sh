@@ -28,6 +28,9 @@ fi
 for migration in 001-ip-mac-history.sql 002-service-policy.sql 003-policy-counter-baselines.sql 005-router-health.sql 006-router-health-alerts.sql 007-destination-accounting.sql 008-custom-policy-destinations.sql 009-drop-custom-policy-destinations.sql 010-policy-quota-alerts.sql 011-destination-quarter-hour-accounting.sql 012-policy-usage-evidence.sql 013-device-overrides.sql; do
     sqlite3 "${DB}" < "/usr/share/r3s-accounting/migrations/${migration}" || exit 1
 done
+if ! sqlite3 "${DB}" 'PRAGMA table_info(device_overrides);' | grep -q '|lift_sites|'; then
+    sqlite3 "${DB}" < /usr/share/r3s-accounting/migrations/014-override-lift-sites.sql || exit 1
+fi
 REG=/etc/r3s-accounting/devices.json
 # The live registry is never packaged (AGENTS.md rule 1). Restore it if an
 # upgrade from a package that used to own it removed it; on a fresh install

@@ -16,12 +16,14 @@ for OpenWrt routers, over **IPv4 and IPv6**.
   router-health alerts, set up from LuCI. See [TELEGRAM.md](TELEGRAM.md).
 - **Telegram commands** (optional, off by default): from your phone, block a
   device, give it extra time past its internet schedule (game/site quotas
-  still apply), or see what is blocked and why:
+  still apply), give it game time (game/site quotas lifted for that device
+  only), or see what is blocked and why:
 
   ```
   /status
   /block living room tv 30m   /block tablet          (until /unblock)
   /extend laptop 30m          /extend laptop 23:00   (ends by itself)
+  /game laptop 1h                                    (ends by itself)
   /unblock laptop
   ```
 

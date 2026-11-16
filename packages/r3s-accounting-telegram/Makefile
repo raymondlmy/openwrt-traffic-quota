@@ -2,7 +2,7 @@ include $(TOPDIR)/rules.mk
 
 PKG_NAME:=r3s-accounting-telegram
 PKG_VERSION:=0.6.1
-PKG_RELEASE:=2
+PKG_RELEASE:=3
 PKG_MAINTAINER:=Graype
 PKG_LICENSE:=GPL-2.0-only
 PKG_LICENSE_FILES:=LICENSE

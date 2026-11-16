@@ -70,7 +70,8 @@ Optional and off by default. Turn it on in **Services → Telegram Reports →
 /status                     what is blocked right now, and why
 /block NAME [30m|2h|23:00]  block a device (until /unblock, or for a while)
 /extend NAME 30m|2h|23:00   let a device online despite its internet schedules
-/unblock NAME               remove your block or extra time
+/game NAME 1h               game time: internet schedules and game/site limits lifted
+/unblock NAME               remove your block, extra time or game time
 /devices                    device names
 ```
 
@@ -92,6 +93,10 @@ How it works and what keeps it safe:
   game quota or a site schedule keeps blocking those sites during the extra
   time, and the reply says which. Extra time always ends by itself (12 hours at
   most). You get a message when it ends.
+- **Game time is separate.** `/game` is the one command that also lifts game/
+  site limits, and only for the device you name: other devices in the same
+  game policy stay limited. It ends by itself (3 hours at most); usage is
+  still counted.
 - **Nothing replayed.** A command that waited more than 2 minutes (bot or
   router down) is skipped, and you are told.
 - **Visible.** Overrides show in the policy page (**Policies by Device**, with a
@@ -100,8 +105,8 @@ How it works and what keeps it safe:
 
 `/unblock` only removes your override. If a schedule is active the device stays
 blocked, and the reply says so; use `/extend` to lift internet schedules anyway.
-To lift a site policy, use its own override on the policy page (it applies to
-every device in that policy).
+To lift site policies for one device, use `/game`; a policy's own override on
+the policy page applies to every device in that policy.
 
 Type `/` in the chat for the command menu, or send `/help`. Names may contain
 spaces and need no quotes (`/block living room tv 30m`); the start of a name is

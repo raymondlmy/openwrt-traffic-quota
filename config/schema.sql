@@ -265,6 +265,8 @@ CREATE TABLE IF NOT EXISTS device_overrides (
     source TEXT NOT NULL CHECK (source IN ('cli','luci','telegram')),
     note TEXT,
     created_at INTEGER NOT NULL,
+    -- 1 = an 'allow' that also lifts site policies (/game); migration 014.
+    lift_sites INTEGER NOT NULL DEFAULT 0 CHECK (lift_sites IN (0,1)),
     FOREIGN KEY (device_id) REFERENCES devices(device_id) ON DELETE CASCADE
 );
 
@@ -279,7 +281,8 @@ CREATE TABLE IF NOT EXISTS device_override_log (
     expires_at INTEGER,
     source TEXT NOT NULL,
     note TEXT,
-    notified_at INTEGER
+    notified_at INTEGER,
+    lift_sites INTEGER NOT NULL DEFAULT 0
 );
 
 CREATE INDEX IF NOT EXISTS idx_device_override_log_unnotified

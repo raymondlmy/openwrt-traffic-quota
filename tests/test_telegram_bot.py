@@ -125,6 +125,29 @@ def main() -> None:
     check("/block with a duration", override(3)[0] == "block" and 7190 <= override(3)[1] - time.time() <= 7200)
     reply = say("/unblock tv")
     check("/unblock clears the override", override(4) is None and "override cleared" in reply)
+    # ---- /game ----
+    def lift(device_id: int):
+        return sqlite3.connect(db).execute(
+            "SELECT lift_sites FROM device_overrides WHERE device_id=?", (device_id,)).fetchone()
+
+    say("/unblock laptop-1")
+    check("/help lists /game", "/game NAME" in say("/help"))
+    check("/game needs a duration", "How long?" in say("/game laptop-1") and override(1) is None)
+    check("/game over 3h refused", "up to 3 hours" in say("/game laptop-1 4h") and override(1) is None)
+    reply = say("/game laptop-1 1h")
+    row = override(1)
+    check("/game sets a 1-hour allow that lifts sites",
+          row is not None and row[0] == "allow" and lift(1) == (1,) and 3590 <= row[1] - time.time() <= 3600)
+    check("/game reply explains", reply.startswith("🎮 laptop-1 games allowed until")
+          and "game/site limits are lifted for laptop-1 only" in reply)
+    reply = say("/status")
+    check("/status: game device not blocked by night or games",
+          "laptop-1: night" not in reply and "laptop-1: games," not in reply
+          and not any(l.startswith("• laptop-1: games") and "allowed" not in l for l in reply.splitlines())
+          and "laptop-1: games allowed until" in reply)
+    say("/extend laptop-1 30m")
+    check("/extend after /game drops the site lift", lift(1) == (0,))
+
     reply = say("/unblock laptop-1")
     check("/unblock of a scheduled device says it is still blocked",
           override(1) is None and "Still blocked by night, games" in reply and "/extend laptop-1 30m" in reply)

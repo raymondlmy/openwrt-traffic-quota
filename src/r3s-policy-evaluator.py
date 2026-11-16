@@ -727,18 +727,24 @@ def decide_custom_blocks(
     client_dns_destinations: dict[tuple[int, str], set[str]],
     now: int,
     device_macs: dict[int, set[str]] | None = None,
+    site_lifted: set[int] | None = None,
 ) -> None:
     """Block only the device/destination pairs owned by an active custom policy.
 
-    Per-device 'allow' overrides (/extend) do not apply here: extra time is for
+    Plain 'allow' overrides (/extend) do not apply here: extra time is for
     general internet access, not for lifting site quotas or site schedules.
+    Only devices in site_lifted (an allow with lift_sites, /game) skip site
+    blocks; their usage is still counted and blocks return on expiry.
     """
     today = local_period_start(now)
     device_macs = device_macs or {}
+    site_lifted = site_lifted or set()
     blocked_pairs: set[tuple[str, str]] = set()
     blocked_pairs6: set[tuple[str, str]] = set()
 
     def block_policy_device(policy_id: int, device_id: int) -> None:
+        if device_id in site_lifted:
+            return
         sources = device_ips.get(device_id, set())
         destinations = set(policy_destinations.get(policy_id, set()))
         for source in sources:
@@ -839,6 +845,74 @@ def load_overrides(con: sqlite3.Connection, now: int) -> tuple[set[int], set[int
     return allowed, blocked
 
 
+def load_site_lifts(con: sqlite3.Connection) -> set[int]:
+    """Devices whose active 'allow' override also lifts site policies (/game).
+
+    Call after load_overrides, which has already removed expired rows. A
+    database without migration 014 has none.
+    """
+    try:
+        rows = con.execute(
+            """SELECT o.device_id FROM device_overrides o
+               JOIN devices d ON d.device_id=o.device_id
+               WHERE d.enabled=1 AND o.action='allow' AND o.lift_sites=1"""
+        ).fetchall()
+    except sqlite3.OperationalError:
+        return set()
+    return {int(r["device_id"]) for r in rows}
+
+
+def read_pair_set(setname: str) -> list[tuple[str, str]]:
+    """Elements of a concatenated 'a . b' set as (a, b) tuples."""
+    raw = run_command([NFT, "-j", "list", "set", "inet", NFT_TABLE, setname]).stdout
+    try:
+        document: Any = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        fail(f"invalid nft JSON for {setname}: {exc}")
+    pairs: list[tuple[str, str]] = []
+    for item in document.get("nftables", []) if isinstance(document, dict) else []:
+        set_object = item.get("set") if isinstance(item, dict) else None
+        if not isinstance(set_object, dict):
+            continue
+        for element in set_object.get("elem", []) or []:
+            # Plain {"concat": [...]}, or {"elem": {"val": {"concat": [...]}, "timeout": ...}}.
+            if isinstance(element, dict) and isinstance(element.get("elem"), dict):
+                element = element["elem"].get("val")
+            parts = element.get("concat") if isinstance(element, dict) else None
+            if isinstance(parts, list) and len(parts) == 2:
+                pairs.append((str(parts[0]), str(parts[1])))
+    return pairs
+
+
+def release_custom_pairs(
+    lifted: set[int], device_ips: dict[int, set[str]], device_macs: dict[int, set[str]]
+) -> None:
+    """Fast path for /game: drop site-block pairs whose source is a site-lifted device."""
+    sources4 = {ip for d in lifted for ip in by_family(device_ips.get(d, set()), 4)}
+    sources6 = {mac for d in lifted for mac in device_macs.get(d, set())}
+    commands: list[str] = []
+    for setname, sources in (("blocked_custom_pair", sources4), ("blocked_custom_pair6", sources6)):
+        if not sources:
+            continue
+        for source, destination in read_pair_set(setname):
+            # Values come from nft and our own canonical sets; re-validate
+            # before writing them back into an nft command.
+            if source in sources and _is_ip(destination):
+                commands.append(
+                    f"delete element inet {NFT_TABLE} {setname} {{ {source} . {destination} }}"
+                )
+    if commands:
+        apply_nft("\n".join(commands) + "\n")
+
+
+def _is_ip(value: str) -> bool:
+    try:
+        ipaddress.ip_address(value)
+    except ValueError:
+        return False
+    return True
+
+
 def device_addresses(
     con: sqlite3.Connection, device_ids: set[int]
 ) -> tuple[dict[int, set[str]], dict[int, set[str]]]:
@@ -868,7 +942,7 @@ def main() -> int:
         "--overrides-only",
         action="store_true",
         help="fast pass after an override change: rebuild whole-device blocks and "
-             "release site blocks of allowed devices; the next full run does the rest",
+             "release site blocks of /game devices; the next full run does the rest",
     )
     args = parser.parse_args()
     now = int(time.time())
@@ -876,11 +950,13 @@ def main() -> int:
     if args.overrides_only:
         with open_database(args.db) as con:
             allowed, blocked = load_overrides(con, now)
+            lifted = load_site_lifts(con)
             schedule_rows = active_schedule_rows(con)
             ids = {int(row["device_id"]) for row in schedule_rows} | allowed | blocked
             ips, macs = device_addresses(con, ids)
             decide_schedule_blocks(schedule_rows, ips, now, device_macs=macs,
                                    allowed_override=allowed, blocked_override=blocked)
+            release_custom_pairs(lifted, ips, macs)
             con.commit()
         return 0
     with open_database(args.db) as con:
@@ -925,6 +1001,7 @@ def main() -> int:
         # Read overrides only now, after the slow sampling above, so a change
         # made (and fast-applied) during this run is not undone by stale state.
         allowed, blocked = load_overrides(con, now)
+        lifted = load_site_lifts(con)
         missing = blocked - device_ids  # devices with no policy: not looked up yet
         if missing:
             extra_ips, extra_macs = device_addresses(con, missing)
@@ -939,6 +1016,7 @@ def main() -> int:
             custom_dns,
             now,
             device_macs,
+            site_lifted=lifted,
         )
         # Only quota rows are passed here: schedules never produce Telegram
         # alerts, even when their block is currently active.

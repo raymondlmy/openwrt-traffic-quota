@@ -1,5 +1,13 @@
 # r3s-accounting-telegram changelog
 
+## 0.6.1-3 - 2026-11-16
+
+- `/game NAME 1h`: game time for one device. Lifts its internet schedules
+  and its game/site limits until it ends (3 hours at most; `/unblock` ends
+  it early). Other devices in the same game policy stay limited. `/extend`
+  is unchanged: game/site limits still apply. Needs the matching
+  `r3s-accounting`. Added to the command menu.
+
 ## 0.6.1-2 - 2026-11-15
 
 - `/extend` lifts internet schedules only; game/site quotas and site

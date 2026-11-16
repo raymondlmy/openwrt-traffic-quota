@@ -131,6 +131,44 @@ def main() -> None:
     check("evaluate: allow leaves the site policy blocked",
           rows[("games", "1")][3] == "block" and "device override" not in rows[("games", "1")][4])
 
+    # /game: an allow with --lift-sites lifts site policies for that device only.
+    check("--lift-sites refused with block",
+          cli(db, "override", "--device", "1", "--action", "block", "--lift-sites").returncode != 0)
+    r = cli(db, "override", "--device", "1", "--action", "allow", "--minutes", "60", "--lift-sites")
+    check("allow --lift-sites accepted", r.returncode == 0 and "laptop-1 games allowed until" in r.stdout)
+    check("load_site_lifts sees it", ev.load_site_lifts(con) == {1})
+    applied.clear()
+    ev.decide_custom_blocks(con, quota_rows, [], ips, {2: {"93.184.215.14", "2606:2800:21f:cb07::1"}},
+                            {}, now, macs, site_lifted=ev.load_site_lifts(con))
+    script = applied[-1]
+    check("site-lifted device has no site pairs (v4 and MAC)",
+          "192.168.1.31 ." not in script and "aa:bb:cc:00:00:01 ." not in script)
+    check("other device keeps its site block", "192.168.1.32 . 93.184.215.14" in script)
+    con.commit()
+    rows = {(r.split("\t")[0], r.split("\t")[1]): r.split("\t") for r in cli(db, "evaluate").stdout.splitlines()}
+    check("evaluate: game lifts the site policy",
+          rows[("games", "1")][3] == "allow" and "games allowed until" in rows[("games", "1")][4])
+    check("evaluate: game lifts the internet schedule", rows[("night", "1")][3] == "allow")
+    check("evaluate: other device's site policy unchanged", rows[("games", "2")][3] == "block")
+    check("overrides lists the site lift", "\tsites" in cli(db, "overrides").stdout)
+    cli(db, "override", "--device", "1", "--action", "allow", "--minutes", "30")
+    check("replacing /game with /extend drops the site lift", ev.load_site_lifts(con) == set())
+    cli(db, "override", "--device", "1", "--action", "allow", "--minutes", "60", "--lift-sites")
+    cli(db, "override", "--device", "1", "--action", "block", "--minutes", "30")
+    check("replacing /game with /block drops the site lift", ev.load_site_lifts(con) == set())
+    cli(db, "override", "--device", "1", "--action", "allow", "--minutes", "30")
+
+    # Fast path: release_custom_pairs drops only the lifted device's pairs.
+    ev.read_pair_set = lambda setname: (
+        [("192.168.1.31", "93.184.215.14"), ("192.168.1.32", "93.184.215.14")]
+        if setname == "blocked_custom_pair" else [("aa:bb:cc:00:00:01", "2606:2800:21f:cb07::1")])
+    applied.clear()
+    ev.release_custom_pairs({1}, ips, macs)
+    check("fast path releases the lifted device's v4 and MAC pairs",
+          "delete element inet" in applied[-1] and "192.168.1.31 . 93.184.215.14" in applied[-1]
+          and "aa:bb:cc:00:00:01 . 2606:2800:21f:cb07::1" in applied[-1])
+    check("fast path leaves other devices' pairs", "192.168.1.32" not in applied[-1])
+
     # Expiry: logged once as 'expire', row removed, device no longer allowed.
     con.execute("UPDATE device_overrides SET expires_at=? WHERE device_id=1", (now - 5,))
     allowed, blocked = ev.load_overrides(con, now)
@@ -148,6 +186,30 @@ def main() -> None:
     sqlite3.connect(old).execute("CREATE TABLE devices(device_id INTEGER, name TEXT, enabled INTEGER)")
     check("evaluator tolerates missing tables", ev.load_overrides(ev.open_database(str(old)), now) == (set(), set()))
     check("CLI evaluate tolerates missing tables", cli(old, "overrides").returncode == 0)
+
+    # Upgrade from a 013-era database: 014 adds lift_sites, existing rows kept.
+    pre = work / "pre014.db"
+    c = sqlite3.connect(pre)
+    c.executescript((REPO / "config/schema.sql").read_text()
+                    .replace("    lift_sites INTEGER NOT NULL DEFAULT 0 CHECK (lift_sites IN (0,1)),\n", "")
+                    .replace("    notified_at INTEGER,\n    lift_sites INTEGER NOT NULL DEFAULT 0\n",
+                             "    notified_at INTEGER\n"))
+    c.execute("INSERT INTO devices(device_id,name,group_name,enabled) VALUES(1,'laptop-1','Kids',1)")
+    c.execute("INSERT INTO device_overrides(device_id,action,expires_at,source,created_at) VALUES(1,'block',NULL,'cli',0)")
+    c.commit()
+    has_col = lambda: any(r[1] == "lift_sites" for r in c.execute("PRAGMA table_info(device_overrides)"))
+    check("pre-014 schema has no lift_sites", not has_col())
+    check("pre-014: CLI lists overrides", "laptop-1\tblock" in cli(pre, "overrides").stdout)
+    check("pre-014: --lift-sites refused clearly",
+          "migration 014" in cli(pre, "override", "--device", "1", "--action", "allow",
+                                 "--minutes", "5", "--lift-sites").stderr)
+    check("pre-014: plain block still works",
+          cli(pre, "override", "--device", "1", "--action", "block").returncode == 0)
+    check("pre-014: evaluator sees no lifts", ev.load_site_lifts(ev.open_database(str(pre))) == set())
+    c.executescript((REPO / "config/migrations/014-override-lift-sites.sql").read_text())
+    check("014 adds the column and keeps rows",
+          has_col() and c.execute("SELECT action,lift_sites FROM device_overrides").fetchone() == ("block", 0))
+    c.close()
 
     print()
     print("ALL PASSED" if not fails else f"{fails} FAILED")

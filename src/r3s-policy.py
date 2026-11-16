@@ -7,7 +7,7 @@ The evaluator/enforcer is deliberately separate; this command manages
 validated device and policy records for LuCI and the command line.
 """
 from __future__ import annotations
-import argparse, json, os, re, sqlite3, sys, tempfile, time
+import argparse, contextlib, json, os, re, sqlite3, sys, tempfile, time
 from datetime import datetime
 
 DB_DEFAULT = "/var/lib/r3s-accounting/accounting.sqlite3"
@@ -469,14 +469,23 @@ def active_overrides(con, now=None):
     Tolerates a database without the 013 migration so read-only views keep working.
     """
     now = int(time.time()) if now is None else now
-    try:
-        rows = con.execute("""SELECT o.device_id,d.name,o.action,o.expires_at,o.source,o.note,o.created_at
+    query = """SELECT o.device_id,d.name,o.action,o.expires_at,o.source,o.note,o.created_at,{lift} AS lift_sites
             FROM device_overrides o JOIN devices d ON d.device_id=o.device_id
             WHERE d.enabled=1 AND (o.expires_at IS NULL OR o.expires_at>?)
-            ORDER BY d.name""", (now,)).fetchall()
-    except sqlite3.OperationalError:
+            ORDER BY d.name"""
+    # Without migration 014 there is no lift_sites column: read it as 0.
+    for lift in ('o.lift_sites', '0'):
+        try:
+            rows = con.execute(query.format(lift=lift), (now,)).fetchall()
+            break
+        except sqlite3.OperationalError:
+            rows = None
+    if rows is None:
         return {}
     return {int(r['device_id']): r for r in rows}
+
+def lifts_sites(row):
+    return row['action'] == 'allow' and bool(row['lift_sites'])
 
 def until_text(expires_at, now=None):
     if expires_at is None:
@@ -488,7 +497,7 @@ def until_text(expires_at, now=None):
     return 'until ' + when.strftime('%a %H:%M')
 
 def override_text(row, now=None):
-    verb = 'allowed' if row['action'] == 'allow' else 'blocked'
+    verb = 'blocked' if row['action'] == 'block' else 'games allowed' if lifts_sites(row) else 'allowed'
     return f"{verb} {until_text(row['expires_at'], now)} ({row['source']})"
 
 def enabled_device(con, device_id):
@@ -513,23 +522,43 @@ def set_override(con, args):
     if args.action == 'allow' and args.minutes is None:
         # An open-ended allow would silently switch off every schedule and quota.
         raise SystemExit('--minutes is required for allow')
+    if args.lift_sites and args.action != 'allow':
+        raise SystemExit('--lift-sites only applies to --action allow')
     device = enabled_device(con, args.device)
     now = int(time.time())
     expires = now + args.minutes * 60 if args.minutes is not None else None
+    lift = 1 if args.lift_sites else 0
+    if lift:
+        columns = con.execute('PRAGMA table_info(device_overrides)').fetchall()
+        if not any(c[1] == 'lift_sites' for c in columns):
+            raise SystemExit('--lift-sites needs database migration 014; reinstall r3s-accounting')
     try:
-        con.execute("""INSERT INTO device_overrides(device_id,action,expires_at,source,note,created_at)
-            VALUES(?,?,?,?,?,?) ON CONFLICT(device_id) DO UPDATE SET action=excluded.action,
-            expires_at=excluded.expires_at,source=excluded.source,note=excluded.note,
-            created_at=excluded.created_at""",
-            (args.device, args.action, expires, args.source, note, now))
-        con.execute("""INSERT INTO device_override_log
-            (event_time,device_id,device_name,event,expires_at,source,note) VALUES(?,?,?,?,?,?,?)""",
-            (now, args.device, device['name'], args.action, expires, args.source, note))
+        if lift:
+            con.execute("""INSERT INTO device_overrides(device_id,action,expires_at,source,note,created_at,lift_sites)
+                VALUES(?,?,?,?,?,?,1) ON CONFLICT(device_id) DO UPDATE SET action=excluded.action,
+                expires_at=excluded.expires_at,source=excluded.source,note=excluded.note,
+                created_at=excluded.created_at,lift_sites=excluded.lift_sites""",
+                (args.device, args.action, expires, args.source, note, now))
+            con.execute("""INSERT INTO device_override_log
+                (event_time,device_id,device_name,event,expires_at,source,note,lift_sites) VALUES(?,?,?,?,?,?,?,1)""",
+                (now, args.device, device['name'], args.action, expires, args.source, note))
+        else:
+            con.execute("""INSERT INTO device_overrides(device_id,action,expires_at,source,note,created_at)
+                VALUES(?,?,?,?,?,?) ON CONFLICT(device_id) DO UPDATE SET action=excluded.action,
+                expires_at=excluded.expires_at,source=excluded.source,note=excluded.note,
+                created_at=excluded.created_at""",
+                (args.device, args.action, expires, args.source, note, now))
+            # Replacing a /game with /extend or /block must drop its site lift.
+            with contextlib.suppress(sqlite3.OperationalError):
+                con.execute("UPDATE device_overrides SET lift_sites=0 WHERE device_id=?", (args.device,))
+            con.execute("""INSERT INTO device_override_log
+                (event_time,device_id,device_name,event,expires_at,source,note) VALUES(?,?,?,?,?,?,?)""",
+                (now, args.device, device['name'], args.action, expires, args.source, note))
         con.commit()
     except Exception:
         con.rollback()
         raise
-    verb = 'allowed' if args.action == 'allow' else 'blocked'
+    verb = 'blocked' if args.action == 'block' else 'games allowed' if lift else 'allowed'
     print(f"{device['name']} {verb} {until_text(expires, now)}")
 
 def clear_override(con, args):
@@ -553,7 +582,8 @@ def list_overrides(con):
     now = int(time.time())
     for device_id, r in active_overrides(con, now).items():
         print(f"{device_id}\t{r['name']}\t{r['action']}\t{r['expires_at'] if r['expires_at'] is not None else '-'}\t"
-              f"{r['source']}\t{until_text(r['expires_at'], now)}\t{r['note'] or '-'}")
+              f"{r['source']}\t{until_text(r['expires_at'], now)}\t{r['note'] or '-'}\t"
+              f"{'sites' if lifts_sites(r) else '-'}")
 
 def evaluate(con):
     # Schedules use the router's local time (System > Time zone). Avoid
@@ -605,9 +635,10 @@ def evaluate(con):
                     reason += f"; {evidence['domain']} -> {evidence['destination_ip']}"
             o = overrides.get(int(d['device_id']))
             # 'allow' (extra time) lifts whole-internet policies only; site
-            # quotas and site schedules stay enforced. 'block' wins everywhere.
+            # quotas and site schedules stay enforced unless the allow lifts
+            # sites too (/game). 'block' wins everywhere.
             if (o is not None and decision != o['action']
-                    and (o['action'] == 'block' or p['service'] != 'custom')):
+                    and (o['action'] == 'block' or p['service'] != 'custom' or lifts_sites(o))):
                 reason = f"{reason}; device override {override_text(o, int(now.timestamp()))}"
                 decision = o['action']
             print(f"{p['name']}\t{d['device_id']}\t{d['name']}\t{decision}\t{reason}")
@@ -668,6 +699,7 @@ def main():
     a.add_argument('--device', type=int, required=True)
     a.add_argument('--action', choices=['allow', 'block'], required=True)
     a.add_argument('--minutes', type=int, help='expire after N minutes (required for allow; block without it lasts until cleared)')
+    a.add_argument('--lift-sites', action='store_true', help='with allow: also lift site quotas and site schedules (game time)')
     a.add_argument('--source', default='cli', help='cli, luci or telegram')
     a.add_argument('--note', help='who/why, at most 80 characters')
     a = sub.add_parser('clear-override', help="remove a device's override; its normal policies apply again")
