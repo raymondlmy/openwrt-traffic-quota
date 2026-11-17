@@ -58,8 +58,20 @@ table inet r3s_policy {
         size 4096
     }
 
+    # Tether guard: MACs of devices whose forwarded packets must not have
+    # already crossed one router. Phones, tablets and laptops send TTL/hop
+    # limit 64 (Android, iOS, macOS, Linux) or 128 (Windows); a client
+    # tethered through one arrives here as 63 or 127. Filled by the evaluator
+    # from the 'tether_guard_groups' UCI option; empty = off.
+    set tether_guard_mac {
+        type ether_addr
+        size 256
+    }
+
     chain forward_policy {
         type filter hook forward priority filter - 2; policy accept;
+        ether saddr @tether_guard_mac ip ttl { 63, 127 } counter drop comment "tether_guard"
+        ether saddr @tether_guard_mac ip6 hoplimit { 63, 127 } counter drop comment "tether_guard6"
         ip saddr @blocked_internet_src counter drop
         ip saddr . ip daddr @blocked_custom_pair meta l4proto tcp counter reject with tcp reset
         ip saddr . ip daddr @blocked_custom_pair counter drop

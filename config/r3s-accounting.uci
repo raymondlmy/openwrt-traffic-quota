@@ -23,6 +23,12 @@ config accounting 'main'
     # auto-detect /opt/adguardhome or /var/lib/adguardhome. Without AdGuard,
     # schedules and whole-device blocks work but per-site quotas never charge.
     option adguard_querylog ''
+    # Tether guard: groups (space-separated) whose devices may not share
+    # their connection. Forwarded packets from them with TTL/IPv6 hop limit
+    # 63 or 127 (a hotspot or tethered client behind the device) are dropped;
+    # the device's own traffic (64/128) is untouched. Not lifted by /extend
+    # or /game. Empty = off. Mobile-data hotspots never reach the router.
+    option tether_guard_groups ''
     # Telegram commands (/block /unblock /extend /status) from the chat in
     # /etc/r3s-accounting/secrets. 1 = on. Set with r3s-telegram-setup
     # schedule --commands on|off or Services > Telegram Reports.

@@ -1,5 +1,15 @@
 # r3s-accounting changelog
 
+## 0.6.1-4 - 2026-11-17
+
+- Tether guard: new UCI option `tether_guard_groups` (default empty = off).
+  For devices in those groups, forwarded packets with IPv4 TTL or IPv6 hop
+  limit 63 or 127 are dropped: that is a hotspot/tethered client behind the
+  device (64 or 128, minus the one hop through it). The device's own traffic
+  is untouched. Not lifted by `/extend` or `/game`. New nft set
+  `tether_guard_mac`, filled by the evaluator from the registry each run.
+  A hotspot over mobile data never reaches the router and is not affected.
+
 ## 0.6.1-3 - 2026-11-16
 
 - Game time: `r3s-policy override --action allow --lift-sites --minutes N`

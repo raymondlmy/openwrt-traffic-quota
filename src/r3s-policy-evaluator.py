@@ -927,6 +927,47 @@ def device_addresses(
     return ips, macs
 
 
+GROUP_RE = re.compile(r"[A-Za-z0-9_-]+")
+
+
+def parse_groups(text: str | None) -> list[str]:
+    """Space/comma-separated group names; 'none' or empty means no groups."""
+    names = [name for name in re.split(r"[\s,]+", text or "") if name]
+    if [name.lower() for name in names] == ["none"]:
+        return []
+    return [name for name in names if GROUP_RE.fullmatch(name)]
+
+
+def tether_guard_macs(con: sqlite3.Connection, groups: list[str]) -> set[str]:
+    """Registry MACs of enabled devices in the tether-guard groups."""
+    if not groups:
+        return set()
+    placeholders = ",".join("?" for _ in groups)
+    rows = con.execute(
+        f"""
+        SELECT dm.mac FROM device_macs dm
+        JOIN devices d ON d.device_id=dm.device_id
+        WHERE d.enabled=1 AND d.group_name IN ({placeholders})
+        """,
+        tuple(groups),
+    ).fetchall()
+    macs = {str(row["mac"]).lower() for row in rows}
+    # MACs are written into nft commands: accept only canonical form.
+    return {mac for mac in macs if MAC_RE.fullmatch(mac)}
+
+
+def sync_tether_guard(macs: set[str], setname: str = "tether_guard_mac") -> None:
+    """Drop forwarded packets that were already routed once (TTL/hop limit
+    63 or 127) from these devices: a hotspot/tethered client behind them.
+    The device's own traffic (64 or 128) is untouched."""
+    commands = [f"flush set inet {NFT_TABLE} {setname}"]
+    if macs:
+        commands.append(
+            f"add element inet {NFT_TABLE} {setname} {{ {', '.join(sorted(macs))} }}"
+        )
+    apply_nft("\n".join(commands) + "\n")
+
+
 def verify_nft() -> None:
     run_command([NFT, "list", "table", "inet", NFT_TABLE])
 
@@ -943,6 +984,12 @@ def main() -> int:
         action="store_true",
         help="fast pass after an override change: rebuild whole-device blocks and "
              "release site blocks of /game devices; the next full run does the rest",
+    )
+    parser.add_argument(
+        "--tether-guard-groups",
+        default="",
+        help="device groups whose tethered/hotspot clients are dropped "
+             "(TTL/hop limit 63 or 127); empty or 'none' = off",
     )
     args = parser.parse_args()
     now = int(time.time())
@@ -1023,6 +1070,9 @@ def main() -> int:
         queue_quota_alerts(con, custom_quota_rows, now)
         decide_schedule_blocks(schedule_rows, device_ips, now, device_macs=device_macs,
                                allowed_override=allowed, blocked_override=blocked)
+        # Not lifted by /extend or /game: game time is for the device itself,
+        # not for another device sharing its connection.
+        sync_tether_guard(tether_guard_macs(con, parse_groups(args.tether_guard_groups)))
         con.commit()
     return 0
 
