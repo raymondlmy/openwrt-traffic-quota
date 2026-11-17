@@ -989,7 +989,7 @@ def main() -> int:
         "--tether-guard-groups",
         default="",
         help="device groups whose tethered/hotspot clients are dropped "
-             "(TTL/hop limit 63 or 127); empty or 'none' = off",
+             "(TTL/hop limit 62 or 126 in the forward hook); empty or 'none' = off",
     )
     args = parser.parse_args()
     now = int(time.time())

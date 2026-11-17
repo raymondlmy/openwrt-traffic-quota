@@ -1,5 +1,15 @@
 # r3s-accounting changelog
 
+## 0.6.1-5 - 2026-11-17
+
+- **Fix (0.6.1-4 cut every guarded device off the internet):** the tether
+  guard dropped TTL/hop limit 63/127, but the forward hook sees packets
+  after this router's own decrement, so a device's own traffic is 63/127
+  there. It now drops 62/126 (tethered client: one hop at the device, one
+  here). 0.6.1-4 was live 18:08-18:45 on 2026-11-17 and blocked all Kids
+  devices; the pre-enforcement probe that "saw TTL 63 from one Kids phone"
+  was that phone's own traffic, not a tethered client.
+
 ## 0.6.1-4 - 2026-11-17
 
 - Tether guard: new UCI option `tether_guard_groups` (default empty = off).

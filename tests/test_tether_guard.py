@@ -54,10 +54,13 @@ def main() -> None:
 
     nft = (REPO / "config/nftables/ruleset-pre/20-r3s-policy.nft").read_text()
     check("ruleset declares the set", "set tether_guard_mac {" in nft)
-    check("IPv4 rule drops TTL 63/127",
-          "ether saddr @tether_guard_mac ip ttl { 63, 127 } counter drop" in nft)
-    check("IPv6 rule drops hop limit 63/127",
-          "ether saddr @tether_guard_mac ip6 hoplimit { 63, 127 } counter drop" in nft)
+    check("IPv4 rule drops TTL 62/126 (forward hook, after our decrement)",
+          "ether saddr @tether_guard_mac ip ttl { 62, 126 } counter drop" in nft)
+    check("IPv6 rule drops hop limit 62/126",
+          "ether saddr @tether_guard_mac ip6 hoplimit { 62, 126 } counter drop" in nft)
+    check("own traffic (63/127 in forward hook) never matched",
+          "63" not in nft.split("tether_guard_mac ip ttl")[1].split("\n")[0]
+          and "127" not in nft.split("tether_guard_mac ip6 hoplimit")[1].split("\n")[0])
 
     print()
     print("ALL PASSED" if not fails else f"{fails} FAILED")
