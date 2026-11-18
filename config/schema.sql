@@ -354,6 +354,14 @@ CREATE TABLE IF NOT EXISTS policy_counter_baselines (
 CREATE INDEX IF NOT EXISTS idx_policy_devices_device
     ON policy_rule_devices(device_id);
 
+CREATE TABLE IF NOT EXISTS game_dns_alerts (
+    alert_id INTEGER PRIMARY KEY AUTOINCREMENT,
+    event_time INTEGER NOT NULL,
+    event_type TEXT NOT NULL CHECK (event_type IN ('failing','recovered')),
+    detail TEXT NOT NULL,
+    sent_at INTEGER
+);
+
 INSERT OR REPLACE INTO schema_meta (key,value)
 VALUES ('schema_version','current');
 

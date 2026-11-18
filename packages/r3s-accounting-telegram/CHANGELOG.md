@@ -1,5 +1,11 @@
 # r3s-accounting-telegram changelog
 
+## 0.6.1-4 - 2026-11-18
+
+- Health alerts also deliver game DNS block alerts (`game_dns_alerts`, from
+  r3s-accounting 0.6.1-7): once when AdGuard stops accepting updates (e.g.
+  password changed), once when it recovers. Skipped if the table is absent.
+
 ## 0.6.1-3 - 2026-11-16
 
 - `/game NAME 1h`: game time for one device. Lifts its internet schedules

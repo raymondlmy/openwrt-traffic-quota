@@ -1,5 +1,14 @@
 # r3s-accounting changelog
 
+## 0.6.1-7 - 2026-11-18
+
+- Game DNS block alerts: after 3 failed evaluator runs in a row (wrong or
+  changed AdGuard password, AdGuard down, no password saved) a 'failing' row
+  is queued in the new `game_dns_alerts` table (migration 015); the first
+  successful run after that queues 'recovered'. Failure count and alert flag
+  live in `schema_meta` (`game_dns_failures`, `game_dns_alerted`).
+  r3s-accounting-telegram 0.6.1-4 delivers them.
+
 ## 0.6.1-6 - 2026-11-18
 
 - Game DNS block: new UCI option `game_dns_groups` (default empty = off) and

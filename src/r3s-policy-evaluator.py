@@ -1157,41 +1157,105 @@ def adguard_request(base: str, user: str, password: str, path: str,
         return None  # set_rules answers plain "OK" on some versions
 
 
+GAME_DNS_ALERT_AFTER = 3  # consecutive failed runs before a Telegram alert
+
+
+def _game_dns_push(con: sqlite3.Connection, lifted: set[int]) -> str | None:
+    """Push the rules if they changed. Returns None on success, else a reason."""
+    groups = parse_groups(uci_get("game_dns_groups"))
+    block, allow = load_game_dns_list()
+    clients = game_dns_client_ips(con, groups, lifted)
+    managed = render_game_dns_rules(block, allow, clients)
+    creds = read_key_file(ADGUARD_API_SECRETS)
+    user, password = creds.get("ADGUARD_USER", ""), creds.get("ADGUARD_PASSWORD", "")
+    if not user or not password:
+        if not managed:
+            return None
+        marker = "/tmp/lib/r3s-accounting/game-dns-no-credentials"
+        if not os.path.exists(marker):
+            log(f"game DNS block not applied: no ADGUARD_USER/ADGUARD_PASSWORD in {ADGUARD_API_SECRETS}")
+            try:
+                Path(marker).touch()
+            except OSError:
+                pass
+        return "no AdGuard password saved on the router"
+    base = adguard_base_url()
+    try:
+        status = adguard_request(base, user, password, "/control/filtering/status")
+        current = [str(line) for line in (status or {}).get("user_rules") or []]
+        desired = merge_game_dns_rules(current, managed)
+        if desired == current:
+            return None
+        adguard_request(base, user, password, "/control/filtering/set_rules", {"rules": desired})
+    except Exception as exc:  # noqa: BLE001 - must not break enforcement
+        log(f"game DNS block sync failed: {type(exc).__name__}: {exc}")
+        code = getattr(exc, "code", None)
+        if code in (401, 403):
+            return "AdGuard rejected the saved password"
+        if type(exc).__name__ in ("URLError", "TimeoutError", "ConnectionRefusedError", "socket.timeout"):
+            return "AdGuard Home is not reachable"
+        return f"{type(exc).__name__}: {exc}"[:200]
+    if managed:
+        log(f"game DNS block updated: {len(block)} domains blocked, "
+            f"{len(allow)} allowed, {len(clients)} client addresses")
+    else:
+        log("game DNS block removed")
+    return None
+
+
+def _meta_get(con: sqlite3.Connection, key: str) -> str:
+    row = con.execute("SELECT value FROM schema_meta WHERE key=?", (key,)).fetchone()
+    return str(row[0]) if row else ""
+
+
+def _meta_set(con: sqlite3.Connection, key: str, value: str) -> None:
+    con.execute(
+        "INSERT INTO schema_meta(key,value) VALUES(?,?) "
+        "ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+        (key, value),
+    )
+
+
+def record_game_dns_result(con: sqlite3.Connection, problem: str | None, now: int) -> None:
+    """Queue a Telegram alert after GAME_DNS_ALERT_AFTER failed runs in a row,
+    and a recovery notice when a run succeeds after that alert."""
+    try:
+        failures = int(_meta_get(con, "game_dns_failures") or 0)
+        alerted = _meta_get(con, "game_dns_alerted") == "1"
+        if problem is None:
+            if alerted:
+                con.execute(
+                    "INSERT INTO game_dns_alerts(event_time,event_type,detail) VALUES(?,?,?)",
+                    (now, "recovered", "AdGuard updates work again"),
+                )
+            if failures or alerted:
+                _meta_set(con, "game_dns_failures", "0")
+                _meta_set(con, "game_dns_alerted", "0")
+        else:
+            failures += 1
+            _meta_set(con, "game_dns_failures", str(failures))
+            if failures >= GAME_DNS_ALERT_AFTER and not alerted:
+                con.execute(
+                    "INSERT INTO game_dns_alerts(event_time,event_type,detail) VALUES(?,?,?)",
+                    (now, "failing", problem),
+                )
+                _meta_set(con, "game_dns_alerted", "1")
+        con.commit()
+    except sqlite3.Error as exc:  # table missing before migration 015
+        log(f"game DNS alert state not recorded: {exc}")
+
+
 def sync_game_dns(con: sqlite3.Connection, lifted: set[int]) -> None:
     """Push the game DNS rules to AdGuard Home when they differ from what is live.
 
     Never raises: DNS filtering must not stop the rest of the evaluator.
     """
     try:
-        groups = parse_groups(uci_get("game_dns_groups"))
-        block, allow = load_game_dns_list()
-        clients = game_dns_client_ips(con, groups, lifted)
-        managed = render_game_dns_rules(block, allow, clients)
-        creds = read_key_file(ADGUARD_API_SECRETS)
-        user, password = creds.get("ADGUARD_USER", ""), creds.get("ADGUARD_PASSWORD", "")
-        if not user or not password:
-            marker = "/tmp/lib/r3s-accounting/game-dns-no-credentials"
-            if managed and not os.path.exists(marker):
-                log(f"game DNS block not applied: no ADGUARD_USER/ADGUARD_PASSWORD in {ADGUARD_API_SECRETS}")
-                try:
-                    Path(marker).touch()
-                except OSError:
-                    pass
-            return
-        base = adguard_base_url()
-        status = adguard_request(base, user, password, "/control/filtering/status")
-        current = [str(line) for line in (status or {}).get("user_rules") or []]
-        desired = merge_game_dns_rules(current, managed)
-        if desired == current:
-            return
-        adguard_request(base, user, password, "/control/filtering/set_rules", {"rules": desired})
-        if managed:
-            log(f"game DNS block updated: {len(block)} domains blocked, "
-                f"{len(allow)} allowed, {len(clients)} client addresses")
-        else:
-            log("game DNS block removed")
-    except Exception as exc:  # noqa: BLE001 - must not break enforcement
+        problem = _game_dns_push(con, lifted)
+    except Exception as exc:  # noqa: BLE001
         log(f"game DNS block sync failed: {type(exc).__name__}: {exc}")
+        problem = f"{type(exc).__name__}: {exc}"[:200]
+    record_game_dns_result(con, problem, int(time.time()))
 
 
 def verify_nft() -> None:

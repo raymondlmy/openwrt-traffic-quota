@@ -83,4 +83,53 @@ At: $occurred"
     }
 done < "$EVENT_FILE"
 
+# Game DNS block (r3s-accounting 0.6.1-7+): AdGuard could not be updated, or
+# recovered. Skipped quietly when the table does not exist yet.
+if sqlite3 -cmd '.timeout 5000' "$DB" \
+    "SELECT 1 FROM sqlite_master WHERE type='table' AND name='game_dns_alerts';" 2>/dev/null | grep -q 1; then
+    sqlite3 -cmd '.timeout 5000' -separator '|' "$DB" 2>"$ERROR_FILE" \
+        "SELECT alert_id,event_time,event_type,replace(replace(detail,char(10),' '),'|','/')
+           FROM game_dns_alerts WHERE sent_at IS NULL ORDER BY alert_id;" > "$EVENT_FILE" || {
+        logger -t r3s-telegram-health "could not read game DNS alerts: $(head -c 200 "$ERROR_FILE" 2>/dev/null)"
+        exit 1
+    }
+    while IFS='|' read -r alert_id event_time event_type detail; do
+        [ -n "$alert_id" ] || continue
+        occurred="$(date -d "@$event_time" '+%Y-%m-%d %H:%M')"
+        if [ "$event_type" = failing ]; then
+            text="⚠️ Game block: AdGuard not updating
+
+$detail.
+Since: $occurred
+
+Kids devices stay as they were at the last update, so /game cannot lift (or restore) the War Thunder/Steam/CS2 block until this is fixed. If the AdGuard password changed, save the new one on the router (README: Game DNS block)."
+        elif [ "$event_type" = recovered ]; then
+            text="✅ Game block: AdGuard updating again
+
+$detail.
+At: $occurred"
+        else
+            logger -t r3s-telegram-health "unknown game DNS event type in alert $alert_id"
+            exit 1
+        fi
+        curl -fsS --connect-timeout 15 --retry 2 \
+            --data-urlencode "chat_id=$TELEGRAM_CHAT_ID" \
+            --data-urlencode "text=$text" \
+            "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
+            > "$RESPONSE_FILE" || {
+            logger -t r3s-telegram-health 'Telegram request failed'
+            exit 1
+        }
+        grep -q '"ok":true' "$RESPONSE_FILE" || {
+            logger -t r3s-telegram-health 'Telegram rejected the game DNS alert'
+            exit 1
+        }
+        sqlite3 -cmd '.timeout 5000' "$DB" \
+            "UPDATE game_dns_alerts SET sent_at=strftime('%s','now') WHERE alert_id=$alert_id AND sent_at IS NULL;" || {
+            logger -t r3s-telegram-health 'could not mark game DNS alert delivered'
+            exit 1
+        }
+    done < "$EVENT_FILE"
+fi
+
 logger -t r3s-telegram-health 'health alerts processed'

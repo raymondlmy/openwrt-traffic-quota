@@ -138,6 +138,41 @@ def main() -> None:
     ev.sync_game_dns(con, set())
     check("API failure is logged, not raised", any("sync failed" in m for m in logs))
 
+    # ---- failure alerts ----
+    def alerts():
+        return [tuple(r) for r in con.execute(
+            "SELECT event_type,detail FROM game_dns_alerts ORDER BY alert_id").fetchall()]
+
+    import urllib.error
+
+    def unauthorized(*_args, **_kwargs):
+        raise urllib.error.HTTPError("http://x", 401, "Unauthorized", None, None)
+
+    ev.adguard_request = unauthorized
+    ev.sync_game_dns(con, set())  # 2nd failure in a row (1st was 'broken' above)
+    check("no alert before 3 failures", alerts() == [])
+    ev.sync_game_dns(con, set())
+    check("alert after 3 failures, password reason",
+          alerts() == [("failing", "AdGuard rejected the saved password")])
+    ev.sync_game_dns(con, set())
+    check("only one failing alert while it stays broken", len(alerts()) == 1)
+    ev.adguard_request = fake_request
+    ev.sync_game_dns(con, set())
+    check("recovery queued once", alerts()[-1][0] == "recovered" and len(alerts()) == 2)
+    ev.sync_game_dns(con, set())
+    check("no repeat recovery", len(alerts()) == 2)
+    ev.ADGUARD_API_SECRETS = str(work / "nocreds")
+    for _ in range(3):
+        ev.sync_game_dns(con, set())
+    check("missing password alerts too", alerts()[-1] == ("failing", "no AdGuard password saved on the router"))
+    ev.uci_get = lambda option: ""
+    ev.sync_game_dns(con, set())
+    check("feature off with no password = success (recovered)", alerts()[-1][0] == "recovered")
+    old = sqlite3.connect(work / "old.db")
+    old.execute("CREATE TABLE schema_meta(key TEXT PRIMARY KEY, value TEXT)")
+    ev.record_game_dns_result(old, "x", 0)
+    check("missing alerts table is tolerated", True)
+
     print(f"\n{'OK' if not fails else f'{fails} FAILED'}")
     sys.exit(1 if fails else 0)
 
