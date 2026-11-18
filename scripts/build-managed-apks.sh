@@ -29,6 +29,7 @@ A="$WORK/accounting"
 install -d -m 0755 "$A/etc/config" "$A/etc/r3s-accounting" "$A/etc/init.d" "$A/usr/bin" \
     "$A/usr/lib/r3s-accounting" "$A/usr/share/r3s-accounting/migrations" "$A/usr/share/nftables.d/ruleset-pre"
 install -m 0600 "$REPO/config/r3s-accounting.uci" "$A/etc/config/r3s-accounting"
+install -m 0644 "$REPO/config/game-dns.list" "$A/etc/r3s-accounting/game-dns.list"
 for file in r3s-accounting r3s-accounting-storage r3s-accounting-registry r3s-policy-evaluator; do
     install -m 0755 "$REPO/config/$file.init" "$A/etc/init.d/$file"
 done

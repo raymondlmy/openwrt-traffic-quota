@@ -1,0 +1,32 @@
+# Game DNS block (r3s-policy-evaluator). Applies to devices in the groups set
+# by 'option game_dns_groups' in /etc/config/r3s-accounting; a device on
+# Telegram /game is left out until its game time ends.
+#
+#   block DOMAIN   AdGuard Home answers 0.0.0.0 for DOMAIN and its subdomains
+#   allow DOMAIN   exception (still resolves), e.g. update downloads
+#
+# '*' may appear inside a label. Changes apply on the next evaluator run.
+
+# War Thunder / Gaijin: sign-in (auth.gaijinent.com, login.gaijin.net),
+# lobby (mgate-*.warthunder.com), profile (char-*.warthunder.com), chat.
+block warthunder.com
+block gaijin.net
+block gaijinent.com
+block gaijin.ru
+# Update downloads keep working, so game time is not spent downloading.
+allow cdn.gaijin.net
+allow aws-yup-distr-*.gaijinent.com
+allow cdnnow-distr.gaijinent.com
+allow dldata-aws.warthunder.com
+
+# Steam and Counter-Strike 2: without Steam sign-in (steamserver.net CMs,
+# steampowered.com, steamcommunity.com) CS2 cannot start online play.
+block steampowered.com
+block steamcommunity.com
+block steamserver.net
+block steamstatic.com
+block steamcontent.com
+block steamusercontent.com
+block steam-chat.com
+block valvesoftware.com
+block counter-strike.net

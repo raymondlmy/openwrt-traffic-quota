@@ -1,5 +1,24 @@
 # r3s-accounting changelog
 
+## 0.6.1-6 - 2026-11-18
+
+- Game DNS block: new UCI option `game_dns_groups` (default empty = off) and
+  conffile `/etc/r3s-accounting/game-dns.list` (War Thunder/Gaijin, Steam,
+  CS2). Each run the evaluator writes a marked section of AdGuard Home user
+  rules (`||domain^$client=<addresses>`) so devices in those groups get
+  0.0.0.0 for the listed domains and the games cannot sign in. `allow` lines
+  become exceptions (shipped: Gaijin update downloads). Addresses are the
+  devices' current ones plus IPv4 seen in 7 days / IPv6 in 1 day.
+- `/game` lifts it for that device only: the device is left out of the client
+  list, also on the fast `--overrides-only` pass. `/extend` does not lift it.
+- Rules are pushed through the AdGuard Home API only when they change, using
+  `ADGUARD_USER`/`ADGUARD_PASSWORD` from `/etc/r3s-accounting/adguard-api`
+  (kept apart from `secrets`, which `r3s-telegram-setup` rewrites). Without
+  credentials, or if AdGuard is unreachable, nothing is blocked and the reason
+  is logged (`logread -e r3s-policy`); other enforcement is unaffected.
+- Limit: a connection already open when game time ends is not cut; DNS only
+  stops new sign-ins/lookups.
+
 ## 0.6.1-5 - 2026-11-17
 
 - **Fix (0.6.1-4 cut every guarded device off the internet):** the tether

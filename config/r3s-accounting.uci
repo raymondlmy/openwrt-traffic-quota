@@ -30,6 +30,15 @@ config accounting 'main'
     # (63/127 after this router's decrement) is untouched. Not lifted by /extend
     # or /game. Empty = off. Mobile-data hotspots never reach the router.
     option tether_guard_groups ''
+    # Game DNS block: groups (space-separated) whose devices get 0.0.0.0 from
+    # AdGuard Home for the domains in /etc/r3s-accounting/game-dns.list (War
+    # Thunder, Steam, CS2), so those games cannot sign in. Lifted per device by
+    # Telegram /game, not by /extend. Needs the AdGuard Home web login in
+    # /etc/r3s-accounting/adguard-api (ADGUARD_USER=, ADGUARD_PASSWORD=; mode
+    # 0600). Empty = off.
+    option game_dns_groups ''
+    # AdGuard Home web/API address; empty = read http.address from its config.
+    option adguard_url ''
     # Telegram commands (/block /unblock /extend /status) from the chat in
     # /etc/r3s-accounting/secrets. 1 = on. Set with r3s-telegram-setup
     # schedule --commands on|off or Services > Telegram Reports.

@@ -2,7 +2,7 @@ include $(TOPDIR)/rules.mk
 
 PKG_NAME:=r3s-accounting
 PKG_VERSION:=0.6.1
-PKG_RELEASE:=5
+PKG_RELEASE:=6
 PKG_MAINTAINER:=Graype
 PKG_LICENSE:=GPL-2.0-only
 PKG_LICENSE_FILES:=LICENSE
@@ -40,12 +40,14 @@ endef
 
 define Package/r3s-accounting/conffiles
 /etc/config/r3s-accounting
+/etc/r3s-accounting/game-dns.list
 endef
 
 define Package/r3s-accounting/install
 	$(INSTALL_DIR) $(1)/etc/config
 	$(INSTALL_CONF) $(PKG_BUILD_DIR)/config/r3s-accounting.uci $(1)/etc/config/r3s-accounting
 	$(INSTALL_DIR) $(1)/etc/r3s-accounting
+	$(INSTALL_CONF) $(PKG_BUILD_DIR)/config/game-dns.list $(1)/etc/r3s-accounting/game-dns.list
 	$(INSTALL_DIR) $(1)/etc/init.d
 	$(INSTALL_BIN) $(PKG_BUILD_DIR)/config/r3s-accounting.init $(1)/etc/init.d/r3s-accounting
 	$(INSTALL_BIN) $(PKG_BUILD_DIR)/config/r3s-accounting-storage.init $(1)/etc/init.d/r3s-accounting-storage

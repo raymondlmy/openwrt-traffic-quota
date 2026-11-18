@@ -968,6 +968,232 @@ def sync_tether_guard(macs: set[str], setname: str = "tether_guard_mac") -> None
     apply_nft("\n".join(commands) + "\n")
 
 
+# Game DNS block: AdGuard Home answers 0.0.0.0 for game/launcher domains to
+# devices in the chosen groups, so the game cannot sign in or find a match.
+# A device on /game (allow override with lift_sites) is left out of the rule's
+# client list, which lifts the block for that device only.
+GAME_DNS_LIST = "/etc/r3s-accounting/game-dns.list"
+# Separate from 'secrets': r3s-telegram-setup rewrites that file.
+ADGUARD_API_SECRETS = "/etc/r3s-accounting/adguard-api"
+ADGUARD_YAML_DEFAULT = "/etc/adguardhome/adguardhome.yaml"
+GAME_DNS_BEGIN = "! r3s-game-dns begin (managed by r3s-policy-evaluator; edits here are overwritten)"
+GAME_DNS_END = "! r3s-game-dns end"
+# Domain suffix; '*' allowed inside labels for launcher hosts such as aws-yup-distr-*.
+GAME_DOMAIN_RE = re.compile(r"(?:[a-z0-9*](?:[a-z0-9*-]{0,61}[a-z0-9*])?\.)+[a-z]{2,63}")
+
+
+def uci_get(option: str) -> str:
+    try:
+        result = subprocess.run(
+            ["uci", "-q", "get", f"r3s-accounting.main.{option}"],
+            capture_output=True, text=True, check=False,
+        )
+    except OSError:
+        return ""
+    return result.stdout.strip() if result.returncode == 0 else ""
+
+
+def log(message: str) -> None:
+    try:
+        subprocess.run(["logger", "-t", "r3s-policy", message], check=False)
+    except OSError:
+        pass
+
+
+def load_game_dns_list(path: str = GAME_DNS_LIST) -> tuple[list[str], list[str]]:
+    """'block DOMAIN' and 'allow DOMAIN' lines; '#' comments. Invalid lines are skipped."""
+    block: list[str] = []
+    allow: list[str] = []
+    try:
+        with open(path, encoding="utf-8") as stream:
+            for raw in stream:
+                parts = raw.split("#", 1)[0].split()
+                if len(parts) != 2:
+                    continue
+                kind, domain = parts[0].lower(), parts[1].lower().strip(".")
+                if not GAME_DOMAIN_RE.fullmatch(domain):
+                    continue
+                target = block if kind == "block" else allow if kind == "allow" else None
+                if target is not None and domain not in target:
+                    target.append(domain)
+    except OSError:
+        pass
+    return block, allow
+
+
+def game_dns_client_ips(
+    con: sqlite3.Connection, groups: list[str], lifted: set[int]
+) -> list[str]:
+    """Current IPs of enabled devices in the groups, minus /game devices."""
+    if not groups:
+        return []
+    placeholders = ",".join("?" for _ in groups)
+    rows = con.execute(
+        f"SELECT device_id FROM devices WHERE enabled=1 AND group_name IN ({placeholders})",
+        tuple(groups),
+    ).fetchall()
+    ids = {int(row["device_id"]) for row in rows} - lifted
+    if not ids:
+        return []
+    ips, _macs = device_addresses(con, ids)
+    candidates = {value for addresses in ips.values() for value in addresses}
+    # Recently seen addresses too, so a device that has just rejoined Wi-Fi is
+    # covered before the next run sees it: IPv4 for 7 days (leases are stable),
+    # IPv6 for 1 day (privacy addresses rotate).
+    id_marks = ",".join("?" for _ in ids)
+    now = int(time.time())
+    try:
+        history = con.execute(
+            f"""SELECT DISTINCT h.ip FROM ip_mac_history h
+                JOIN device_macs m ON m.mac=h.mac
+                WHERE m.device_id IN ({id_marks})
+                  AND h.observed_at > CASE WHEN instr(h.ip, ':') > 0 THEN ? ELSE ? END""",
+            (*sorted(ids), now - 86400, now - 7 * 86400),
+        ).fetchall()
+        candidates.update(str(row[0]) for row in history)
+    except sqlite3.Error:
+        pass
+    result: set[str] = set()
+    for value in candidates:
+        try:
+            address = ipaddress.ip_address(value)
+        except ValueError:
+            continue
+        # DNS queries do not come from link-local addresses.
+        if not address.is_link_local:
+            result.add(str(address))
+    return sorted(result, key=ip_sort_key)
+
+
+def render_game_dns_rules(block: list[str], allow: list[str], clients: list[str]) -> list[str]:
+    if not block or not clients:
+        return []
+    target = "|".join(clients)
+    rules = [GAME_DNS_BEGIN]
+    rules += [f"||{domain}^$client={target}" for domain in block]
+    rules += [f"@@||{domain}^$client={target}" for domain in allow]
+    rules.append(GAME_DNS_END)
+    return rules
+
+
+def merge_game_dns_rules(current: list[str], managed: list[str]) -> list[str]:
+    """Replace the managed section of AdGuard user rules; keep everything else."""
+    kept: list[str] = []
+    inside = False
+    for line in current:
+        if line == GAME_DNS_BEGIN:
+            inside = True
+            continue
+        if inside:
+            if line == GAME_DNS_END:
+                inside = False
+            continue
+        kept.append(line)
+    return kept + managed
+
+
+def read_key_file(path: str) -> dict[str, str]:
+    values: dict[str, str] = {}
+    try:
+        with open(path, encoding="utf-8") as stream:
+            for line in stream:
+                key, sep, value = line.strip().partition("=")
+                if sep:
+                    values[key.strip()] = value.strip().strip("'\"")
+    except OSError:
+        pass
+    return values
+
+
+def adguard_base_url() -> str:
+    configured = uci_get("adguard_url")
+    if configured:
+        return configured.rstrip("/")
+    try:
+        result = subprocess.run(
+            ["uci", "-q", "get", "adguardhome.config.config_file"],
+            capture_output=True, text=True, check=False,
+        )
+        yaml_path = result.stdout.strip() or ADGUARD_YAML_DEFAULT
+    except OSError:
+        yaml_path = ADGUARD_YAML_DEFAULT
+    address = ""
+    try:
+        with open(yaml_path, encoding="utf-8") as stream:
+            in_http = False
+            for line in stream:
+                if re.match(r"^\S", line):
+                    in_http = line.startswith("http:")
+                    continue
+                match = re.match(r"^\s+address:\s*['\"]?([^'\"\s]+)", line)
+                if in_http and match:
+                    address = match.group(1)
+                    break
+    except OSError:
+        pass
+    host, _sep, port = address.rpartition(":")
+    if host in ("", "0.0.0.0", "[::]", "::"):
+        host = "127.0.0.1"
+    return f"http://{host}:{port or '3000'}"
+
+
+def adguard_request(base: str, user: str, password: str, path: str,
+                    body: dict[str, Any] | None = None) -> Any:
+    import urllib.request
+
+    token = base64.b64encode(f"{user}:{password}".encode()).decode()
+    data = json.dumps(body).encode() if body is not None else None
+    request = urllib.request.Request(base + path, data=data, method="POST" if data else "GET")
+    request.add_header("Authorization", f"Basic {token}")
+    if data is not None:
+        request.add_header("Content-Type", "application/json")
+    with urllib.request.urlopen(request, timeout=10) as response:
+        payload = response.read()
+    if not payload.strip():
+        return None
+    try:
+        return json.loads(payload)
+    except json.JSONDecodeError:
+        return None  # set_rules answers plain "OK" on some versions
+
+
+def sync_game_dns(con: sqlite3.Connection, lifted: set[int]) -> None:
+    """Push the game DNS rules to AdGuard Home when they differ from what is live.
+
+    Never raises: DNS filtering must not stop the rest of the evaluator.
+    """
+    try:
+        groups = parse_groups(uci_get("game_dns_groups"))
+        block, allow = load_game_dns_list()
+        clients = game_dns_client_ips(con, groups, lifted)
+        managed = render_game_dns_rules(block, allow, clients)
+        creds = read_key_file(ADGUARD_API_SECRETS)
+        user, password = creds.get("ADGUARD_USER", ""), creds.get("ADGUARD_PASSWORD", "")
+        if not user or not password:
+            marker = "/tmp/lib/r3s-accounting/game-dns-no-credentials"
+            if managed and not os.path.exists(marker):
+                log(f"game DNS block not applied: no ADGUARD_USER/ADGUARD_PASSWORD in {ADGUARD_API_SECRETS}")
+                try:
+                    Path(marker).touch()
+                except OSError:
+                    pass
+            return
+        base = adguard_base_url()
+        status = adguard_request(base, user, password, "/control/filtering/status")
+        current = [str(line) for line in (status or {}).get("user_rules") or []]
+        desired = merge_game_dns_rules(current, managed)
+        if desired == current:
+            return
+        adguard_request(base, user, password, "/control/filtering/set_rules", {"rules": desired})
+        if managed:
+            log(f"game DNS block updated: {len(block)} domains blocked, "
+                f"{len(allow)} allowed, {len(clients)} client addresses")
+        else:
+            log("game DNS block removed")
+    except Exception as exc:  # noqa: BLE001 - must not break enforcement
+        log(f"game DNS block sync failed: {type(exc).__name__}: {exc}")
+
+
 def verify_nft() -> None:
     run_command([NFT, "list", "table", "inet", NFT_TABLE])
 
@@ -1005,6 +1231,7 @@ def main() -> int:
                                    allowed_override=allowed, blocked_override=blocked)
             release_custom_pairs(lifted, ips, macs)
             con.commit()
+            sync_game_dns(con, lifted)
         return 0
     with open_database(args.db) as con:
         custom_quota_rows = active_custom_quota_rows(con)
@@ -1074,6 +1301,8 @@ def main() -> int:
         # not for another device sharing its connection.
         sync_tether_guard(tether_guard_macs(con, parse_groups(args.tether_guard_groups)))
         con.commit()
+        # After commit: an AdGuard API call must not hold the database open.
+        sync_game_dns(con, lifted)
     return 0
 
 
